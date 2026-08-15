@@ -338,6 +338,108 @@ for any node is in its tooltip.
   rule is scoped to **speech only**: banal lines over an escalating scene, never a
   banal scene.
 
+### Music video
+
+A separate three-stage chain from the cinematic one, because a song already has an
+arc and the cinematic rules fight it. Full pipeline: separate the vocal, align the
+lyrics against it, slice the alignment by render window, then write prompts.
+
+- **MMH3 Forced Align (Lyrics)** — place KNOWN lyrics on the timeline. Forced
+  alignment, not transcription: the words are given and only their timing is solved,
+  so it cannot mishear. That matters because a transcriber guesses badly at singing,
+  and everything downstream inherits the mistake — prompts describing words nobody
+  sang, typography quoting a mishearing.
+
+  ⚠ **Feed it the lyrics AS PERFORMED, not as prompted.** Alignment assumes the text
+  and the audio hold the same words the same number of times. Suno repeats hooks and
+  stutters refrains; one copy of a line against three utterances leaves the aligner
+  to pick one and strand the rest, which surfaces as large gaps, stretched words and
+  whole sections landing early. **No parameter fixes that** — `nonspeech_skip`,
+  `max_word_dur`, VAD and `snap_to_onset` all decide *where a word may land*, and
+  none of them can conjure two missing repeats. Writing the line three times does.
+
+  It refuses to return a word sequence that differs from its input, since a
+  misaligned lyric is fiction every consumer would quote. Emits the same
+  `whisper_alignment` type ComfyUI-Whisper does — so `Whisper → Text` and
+  `Whisper → Segments` consume it unchanged — plus JSON, so a song is aligned once
+  and reloaded instead of paying for a 3 GB model every run.
+
+  Needs isolated vocals; any separator will do. Needs `stable-ts`, which is one pure-
+  Python package on top of `openai-whisper`. `large-v3.pt` is shared with any
+  non-ComfyUI install through `folder_paths`, so there is no second copy.
+
+  **The report is the interface.** It prints the section map — the one line you can
+  check against your own ears — and classifies every anomaly using the audio itself
+  rather than guessing: a gap over silence is a correct skip, a gap over audio is a
+  skipped passage, and words sitting on silence are misplaced. That distinction is
+  what separates a musical pause from a misalignment, and no amount of timing
+  arithmetic can make it.
+
+  ⚠ `vad` (Silero) is available and was **far worse** on a produced vocal —
+  131 of 190 words came back zero-length, because Silero is trained on speech and
+  does not fire on singing. Useful for spoken word; not for song.
+
+- **MMH3 Music Analysis** — librosa: BPM, key and mode, a 4/4 bar grid, and a 10 Hz
+  RMS energy curve, from the FULL MIX rather than the stem. Ported from
+  music-director's `music.py` minus its cut-salience blend and agglomerative
+  segmentation — both exist to *choose* scene boundaries, and the looping sampler's
+  windows are uniform and already fixed.
+
+  What survives is what still helps inside a window someone else decided: bar lines
+  are cut candidates alongside word onsets, and energy is the only thing that tells
+  an instrumental window whether the music there is a soft fall or a drop.
+
+- **MMH3 Lyrics to Windows** — the join between a song's timeline and a sampler's
+  schedule. Inputs mirror **MMH3 Split Audio to Windows** exactly so both read the
+  same plan and cannot disagree about which frames window *i* covers.
+
+  Three things it exists to get right, each silently wrong if hand-rolled:
+
+  **Window-relative timestamps.** H3 shot times are measured from the start of the
+  CHUNK. A window opening at 70.15s holding a word at 72.40s must emit `00:02.250`;
+  absolute time produces prompts H3 cannot act on and nothing errors. Context
+  windows are rebased onto *this* window's clock too, so a neighbouring line does
+  not read as a second, contradictory timeline.
+
+  **`has_lyrics`.** Intros, instrumental breaks and outros are real windows with
+  nothing sung in them, and they need a prompt branch that says so rather than one
+  left to invent singing.
+
+  **Section context.** Uniform windows and musical sections do not divide, so a
+  straddling window reports `chorus -> bridge (bridge begins at 00:07.000)` rather
+  than pretending it sits in one.
+
+- **MMH3 Music Scene Plan Prompt** — the same three stages as **MMH3 Scene Plan
+  Prompt**, with the rules inverted where a song demands it:
+
+  | | cinematic | music video |
+  |---|---|---|
+  | the arc | invented, nothing resolves before beat N | **the song's** — "do NOT invent an escalation" |
+  | a repeat | would be redundant | **should feel like the same chorus** |
+  | the words | invented | supplied, verbatim, per window |
+  | shot times | invented | supplied as word onsets |
+
+  `non_diegetic_music` describes **this** track rather than composing an
+  alternative, and `overall_soundscape` opens with "the song is the audio" so it
+  does not invent room tone competing with it.
+
+  **Typography is rationed in `beats`, once, across the whole song** — "most should
+  not." Decided per chunk with lyrics in hand, every chunk reaches for it and the
+  result reads as a lyric video. Two modes: `exact lyrics` quotes the sung line
+  verbatim; `text bursts` allows fragments and re-spellings, which is invention
+  grounded in the real words rather than replacing them.
+
+  A window with `has_lyrics: false` switches to an instrumental branch that forbids
+  singing, asks for visual event instead, and **suppresses typography even when the
+  beat sheet assigned it** — there is no line to quote.
+
+  `reference_images` tells the definitions stage that attached images ARE the
+  subject, that several images are one person from different angles, and that the
+  image beats the brief on appearance. Definitions only: the description is written
+  once and reused, and re-deriving it per call is how a subject drifts. Without the
+  flag a vision model handed pictures and no instruction describes an invented
+  character anyway.
+
 ### Sampling
 - **MiniMax H3 Looping Sampler** — fill a whole clip chunk by chunk in one node
   execution. The graph is the same size for 4 chunks or 40, which is the point.

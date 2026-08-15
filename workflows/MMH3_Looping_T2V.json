@@ -2419,20 +2419,7 @@
         "megabit": true,
         "save_metadata": true,
         "pingpong": false,
-        "save_output": true,
-        "videopreview": {
-          "hidden": false,
-          "paused": false,
-          "params": {
-            "filename": "MMH3_00410-audio.mp4",
-            "subfolder": "MMH3",
-            "type": "output",
-            "format": "video/nvenc_h264-mp4",
-            "frame_rate": 24,
-            "workflow": "MMH3_00410.png",
-            "fullpath": "C:\\ComfyUI\\output\\MMH3\\MMH3_00410-audio.mp4"
-          }
-        }
+        "save_output": true
       },
       "color": "#323",
       "bgcolor": "#535"

@@ -1,6 +1,10 @@
 from . import patch_guide_origin as _patch_guide_origin
 from . import patch_ref_labels as _patch_ref_labels
 from .nodes_loop import MMH3SeedOverlap, MMH3ConcatAV, MMH3FindDivergence, MMH3JoinAV, MMH3PackAV
+from .nodes_align import MMH3ForcedAlign
+from .nodes_lyricwindows import MMH3LyricsToWindows
+from .nodes_music_analysis import MMH3MusicAnalysis
+from .nodes_musicscene import MMH3MusicScenePlanPrompt
 from .nodes_encode import MMH3StreamingEncode
 from .nodes_lint import MMH3PromptLint
 from .nodes_music import (MMH3LyricsSectionize, MMH3MusicCaptionSplit,
@@ -75,6 +79,7 @@ NODES = [
     MMH3AssetPlan,
     MMH3TaskSystemPrompt,
     MMH3ScenePlanPrompt,
+    MMH3MusicScenePlanPrompt,
     MMH3WindowContext,
     MMH3PromptAccumulate,
     MMH3PromptPart,
@@ -106,6 +111,9 @@ NODES = [
     MMH3ChunkedPixelUpscale,
     # MMH3Tools/audio
     MMH3SplitAudioToWindows,
+    MMH3ForcedAlign,
+    MMH3LyricsToWindows,
+    MMH3MusicAnalysis,
     # MMH3Tools/utils
     MMH3LatentInfo,
     MMH3FindDivergence,

@@ -2009,17 +2009,9 @@
         }
       },
       "widgets_values": {
-        "audio": "Candy Teeth.wav",
+        "audio": "",
         "start_time": 15,
-        "duration": 0,
-        "audiopreview": {
-          "params": {
-            "start_time": 15,
-            "duration": 0,
-            "filename": "Candy Teeth.wav",
-            "type": "input"
-          }
-        }
+        "duration": 0
       },
       "color": "#232",
       "bgcolor": "#353"
@@ -3860,7 +3852,7 @@
         }
       },
       "widgets_values": [
-        "ComfyUI_temp_toity_00015_.png",
+        "",
         true,
         32,
         32,

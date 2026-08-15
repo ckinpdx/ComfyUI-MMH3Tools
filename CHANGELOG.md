@@ -9,6 +9,75 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [0.75.0] - 2026-08-14
+
+Music video prompt building: a separate chain from the cinematic planner, driven by
+the song rather than by an invented arc. Four nodes, 50 in the pack.
+
+### Added
+- **`MMH3ForcedAlign`** (*MMH3 Forced Align (Lyrics)*, `MMH3Tools/audio`) — places
+  KNOWN lyrics on the timeline with stable-ts. Forced alignment, not transcription:
+  the words are given and only timing is solved, so it cannot mishear. Raises rather
+  than returning a word sequence that differs from its input.
+
+  Emits the `whisper_alignment` type ComfyUI-Whisper does, so the existing
+  `Whisper → Text` / `Whisper → Segments` nodes consume it unchanged, plus JSON so a
+  song is aligned once and reloaded.
+
+  The report classifies anomalies from the AUDIO rather than from timings: a gap over
+  silence is a correct skip, a gap over audio is a skipped passage, words on silence
+  are misplaced. It also prints the section map, which is the one line checkable
+  against your own ears.
+
+- **`MMH3MusicAnalysis`** (*MMH3 Music Analysis*, `MMH3Tools/audio`) — librosa BPM,
+  key/mode, 4/4 bar grid and a 10 Hz RMS curve from the full mix. Ported from
+  music-director's `music.py` **minus** its cut-salience blend and agglomerative
+  segmentation: both exist to choose scene boundaries, and the looping sampler's
+  windows are uniform and already fixed.
+
+- **`MMH3LyricsToWindows`** (*MMH3 Lyrics to Windows*, `MMH3Tools/audio`) — slices an
+  alignment by render window. Inputs mirror `MMH3SplitAudioToWindows` exactly so both
+  read the same plan. Emits the window's verbatim lines with **chunk-relative**
+  timestamps, ±1 window of context on the same clock, `has_lyrics`, the section (with
+  a straddling boundary named), word onsets, and — with `music_json` — the window's
+  energy and bar lines.
+
+- **`MMH3MusicScenePlanPrompt`** (*MMH3 Music Scene Plan Prompt*, `MMH3Tools/prompt`)
+  — three stages like `MMH3ScenePlanPrompt`, rules inverted where a song demands it:
+  the arc is the song's ("do NOT invent an escalation"), a repeated chorus should feel
+  like the same chorus, the words and shot timings are supplied rather than invented.
+  Typography is rationed once across the whole song in `beats`. A window with
+  `has_lyrics: false` takes an instrumental branch that forbids singing and suppresses
+  typography even when the beat sheet assigned it. `reference_images` tells the
+  definitions stage that attached images ARE the subject and beat the brief on
+  appearance.
+
+- `tests/test_forced_align.py`, `tests/test_lyric_windows.py`,
+  `tests/test_music_scene.py` — 21 test files, all green.
+
+### Fixed
+- **`MMH3ForcedAlign` was not releasing whisper.** `del model` drops a name, not the
+  weights: large-v3 is ~6 GB of fp32 and stayed resident across runs. Now mirrors
+  music-director's `release_model()` — **`.cpu()` first**, then `gc.collect()` (torch
+  modules hold reference cycles, so refcounting alone does not free them in a
+  long-lived process), then `empty_cache()`. The report prints MB freed, so a failed
+  unload is visible rather than discovered later as missing VRAM.
+
+### Docs
+- Scrubbed personal media references from all three shipped workflows: an audio
+  filename and two image filenames, plus an **absolute output path**
+  (`C:\ComfyUI\output\...`) inside a `VHS_VideoCombine` preview blob. Those are
+  written by *previewing*, not by configuring, so any workflow saved after a run
+  carries them.
+
+### Notes on what does NOT work, recorded so they are not retried
+- **Silero `vad`** made alignment far worse on a produced vocal: 131 of 190 words came
+  back zero-length, because it is trained on speech and does not fire on singing.
+- **`nonspeech_skip`, `max_word_dur`, `snap_to_onset` and the separator** all decide
+  where a word may land. None of them can fix a lyric that under-describes the
+  performance — if Suno sings a line three times and the lyrics hold it once, the
+  aligner strands two. **Writing the line three times is the fix.**
+
 ## [0.74.2] - 2026-08-14
 
 ### Added

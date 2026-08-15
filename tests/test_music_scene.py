@@ -51,7 +51,47 @@ ex = run("beats", lyrics=LY, typography="exact lyrics")[0]
 check("assigned across the whole song", "MOST SHOULD" in ex, True)
 check("...verbatim mode says so", "VERBATIM" in ex, True)
 bu = run("beats", lyrics=LY, typography="text bursts")[0]
-check("...burst mode allows a fragment", "does not have to be literal" in bu, True)
+check("...burst mode allows a fragment", "does not have to be" in bu, True)
+# "much" on screen: burst mode picked the shortest word in the line, because
+# nothing said the fragment has to carry meaning on its own
+sh = run("shots", beat_index=0, lyrics=LY, shot_times=TIMES, beat_sheet="a",
+         typography="text bursts")[0]
+check("a burst must stand alone", "MEAN SOMETHING ALONE" in sh, True)
+check("...function words banned by name", '"much"' in sh, True)
+check("...with a concrete test", "poster" in sh, True)
+check("beats is told to pick lines worth quoting",
+      "worth putting on a screen" in bu, True)
+
+# observed: typography rendered flat, like a one-word subtitle. Saying where the
+# text "sits" is satisfied by centring it, which IS the subtitle look.
+for mode in ("text bursts", "exact lyrics"):
+    t = run("shots", beat_index=0, lyrics=LY, shot_times=TIMES, beat_sheet="a",
+            typography=mode)[0]
+    check("%-13s treats text as design" % mode, "NOT A SUBTITLE" in t, True)
+    check("%-13s makes scale the first choice" % mode, "SCALE FIRST" in t, True)
+    check("%-13s asks it to land on an onset" % mode, "word onset or a bar line" in t, True)
+    check("%-13s keeps one treatment per chunk" % mode,
+          "One treatment per chunk" in t, True)
+# the validated fix from 2026-08-12: "intone their meaning" was read as NEVER emit
+# a string, so H3 was handed no text and drew invented glyphs
+bt = run("shots", beat_index=0, lyrics=LY, shot_times=TIMES, beat_sheet="a",
+         typography="text bursts")[0]
+check("burst is split into CHOOSE then RENDER",
+      "1. **CHOOSE**" in bt and "2. **RENDER**" in bt, True)
+check("...with the three-word all-caps spec", "THREE WORDS, ALL CAPS" in bt, True)
+check("...and a validity rule against describing text it never quotes",
+      "VALIDITY RULE" in bt and "invalid" in bt, True)
+check("...naming the failure that produced gibberish", "cascade in neon" in bt, True)
+
+# the one rule that survived MiniMax's own MV/subtitle skill review
+dt = run("definitions")[0]
+check("typography cannot leak into subject_definitions",
+      "NO TYPOGRAPHY INSTRUCTIONS IN HERE" in dt, True)
+check("...because it would reuse in every chunk", "leak into every chunk" in dt, True)
+
+check("typography off says nothing about design",
+      "NOT A SUBTITLE" in run("shots", beat_index=0, lyrics=LY, shot_times=TIMES,
+                              beat_sheet="a")[0], False)
 
 print("\n4. shots: cut on the words it was GIVEN")
 sysp, rep = run("shots", beat_index=2, lyrics=LY, shot_times=TIMES,

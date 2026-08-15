@@ -73,6 +73,11 @@ DEFINE EVERY LABEL YOU WILL USE, AND USE EVERY LABEL YOU DEFINE. Describe what i
 VISIBLE and permanent: build, hair, clothing, markings, the space. Not mood, not
 backstory.
 
+**NO TYPOGRAPHY INSTRUCTIONS IN HERE.** A <Subject> line says what a reference asset
+IS. Animation or text directives in it are a category error -- they are not
+properties of the asset, and they leak into every chunk that reuses the line. Where
+on-screen text goes and how it behaves is decided per chunk, not here.
+
 A music video returns to the same performer and the same places repeatedly, so
 these carry more weight here than in a scene: they are what makes chunk 8 look like
 chunk 1.
@@ -148,13 +153,52 @@ be rationed.
 - Prefer the hook, the title line, or a line that repeats. %s
 - Say it plainly in the summary, e.g. "on-screen text on the hook" -- the chunk's own
   writer will render it and will not add any of its own.
+
+**Decide the TYPOGRAPHIC IDENTITY once, here, and state it in the first summary that
+carries text.** One material, one behaviour, for the whole video -- otherwise each
+chunk invents its own and the video has no design.
+
+Build it from THIS video's world, not from a font menu. The type should look like it
+belongs to the thing the song is about: circuit traces and etched copper for a
+machine song, vapour and sugar-floss for a candy one, wet concrete, torn paper,
+CRT phosphor, embroidery. Name the material, the case and the weight, and the chunks
+will render that identity rather than defaulting to plain white capitals.
 """
 
 _TYPO_EXACT = ("The text must be the sung line VERBATIM, so pick lines worth "
                "reading whole.")
-_TYPO_BURST = ("The text is a short burst drawn from the sung line -- a fragment, "
-               "a word, a re-spelling. It does not have to be the whole line and it "
-               "does not have to be literal.")
+_TYPO_BURST = ("The text is a short burst drawn from the sung line -- a fragment, a "
+               "word, a re-spelling. It does not have to be the whole line or be "
+               "literal, but it must MEAN something standing alone, so choose lines "
+               "that contain a word worth putting on a screen. A line whose only "
+               "short words are 'much' or 'just' is a bad candidate.")
+
+_TYPO_TREATMENT = """
+## MAKE IT DESIGN, NOT A SUBTITLE
+
+A word at readable size in the middle of frame IS a subtitle and reads as one. On
+screen text in a music video is a graphic decision, and the default choice is always
+the flat one.
+
+- **SCALE FIRST, and the safe answer is wrong.** Fill the frame edge to edge, crop
+  the letters at the sides, or bury it small in a corner. Mid-sized and centred is
+  the single option that looks like captioning.
+- **DECIDE WHERE IT LIVES.** In the world -- painted on the wall behind her, lit on a
+  monitor in shot, printed across her coat, caught in the mirror -- or an overlay
+  that commits to being one: hard cut, no fade, sitting flat on top of the picture.
+  Pick one. The undecided version is the subtitle.
+- **GIVE IT A MOMENT.** It arrives ON a word onset or a bar line from the timings
+  above, not whenever. It can stamp in, flicker, hold a single beat and go, or stay
+  while the shot cuts underneath it.
+- **USE THE IDENTITY THE BEAT SHEET SET.** If it named a material -- circuit traces,
+  vapour, torn paper -- render the letters IN that material, and do not invent a
+  different one. If it named none, choose one from this video's world and describe
+  it as a material rather than as a font: what the letters are MADE of, their case
+  and weight, their colour against the frame. "Text appears" is not a description.
+- **One treatment per chunk.** Text that behaves differently each time it appears
+  reads as an accident rather than a decision.
+"""
+
 
 _SHOTS = """You are writing ONE section of ONE chunk of a MUSIC VIDEO:
 detailed_description.
@@ -187,8 +231,42 @@ are sung, and they are given in THIS CHUNK's time, starting at 00:00.000.
 
 - Give the camera and the light INTENT. Motion, texture, a practical that pulses
   with the track.
+- **SPLIT FRAMES ARE A TOOL HERE, so reach for them on purpose.** Two places, two
+  times or two framings named inside ONE shot makes H3 divide the frame -- split
+  screen, inset, banded overlay. That is a music-video technique, not an artifact.
+  Say which halves hold what, and whether they move together or against each other.
 - The performer can be present, absent, or multiplied. A music video is not obliged
-  to be literal about who is singing.
+  to be literal about who is singing, and several of her in one frame -- tiled,
+  mirrored, out of step -- is a legitimate image rather than a mistake.
+- Vary it. A whole video of split frames is as flat as none; the technique lands
+  where a single-image shot came before it.
+
+## FRAME TREATMENTS COME FROM THE VIDEO'S WORLD
+
+The same rule as the typography: an effect belongs if the song earns it. A machine
+song earns RGB channel split, scanlines, datamosh, dropped frames, interlace tear.
+A soft one earns bloom, halation, print-through, smeared highlights. Take the
+treatment from what the video is ABOUT rather than from a menu of filters.
+
+Known to render well: **split frames**, **RGB channel split**, **slow motion**.
+Those are starting points, not the whole vocabulary -- name the treatment
+explicitly, say how strong it is, and say WHEN it hits. An effect that runs
+continuously stops reading as an effect.
+
+## CHOOSE A TEMPO FOR THE CHUNK, AND SAY IT
+
+Speed is a decision, and leaving it unmade gets you the model's default rather than
+yours.
+
+- **SLOW MOTION** renders well and holds when you ask for it. Say so explicitly --
+  it is a choice you make, not one the model makes for you.
+- **REALTIME** is the other choice. If a chunk ever comes back slower than intended,
+  opening the style sentences with "live-action video" is the documented counter.
+- **RAPID MICRO-SHOTS** are the other pole: many short shots instead of one take,
+  aggressive reframing, snap-zooms into eyes and hands, orbits. Dense and edit-led,
+  the opposite of a held frame.
+- Match it to the music. The energy reading for this chunk is above -- a peak
+  chunk and a near-silent one should not move at the same speed.
 - Add visual incident that changes no story: weather, crowd, a surface reacting,
   something breaking at the edge of frame.
 - Prefer one exact, strange image over four general ones.
@@ -239,11 +317,31 @@ _TYPO_SHOTS_BURST = """
 
 The beat sheet assigned on-screen text to this chunk.
 
-- Put it in DOUBLE QUOTES -- that is what makes H3 render text ON SCREEN.
-- It does NOT have to be the whole line. A fragment, one word, a re-spelling, a
-  fracture of it. Invention is welcome here: you have the real words in front of
-  you, so what you make of them is grounded rather than guessed.
-- Keep it SHORT. Text on screen is read in a second or not at all.
+**Do it in TWO STEPS, and never merge them.**
+
+1. **CHOOSE** the phrase. Paraphrase freely -- semantic intent beats word accuracy.
+   Aim for THREE WORDS, ALL CAPS. It does not have to be the whole line, or literal:
+   a fragment, one word, a re-spelling, a fracture of it. You have the real words in
+   front of you, so what you make of them is grounded rather than guessed.
+2. **RENDER** it as a literal string in DOUBLE QUOTES. Double quotes are what make
+   H3 draw text ON SCREEN.
+
+**VALIDITY RULE: a prompt that describes text moving without quoting the text is
+invalid.** Writing "words of devotion cascade in neon" names no string, so the model
+draws invented letterforms -- observed, and it is gibberish on screen. It can only
+draw a string it was given. If you describe type doing something, the thing it is
+doing must appear in quotes in the same sentence.
+- **IT MUST MEAN SOMETHING ALONE.** A noun, a verb, a name, an order. The word or
+  phrase a stranger would remember from the line, not the shortest one in it.
+- NEVER a function word. Not "much", "very", "just", "so", "the", "and", "that",
+  "this", "some", "then", "when", "with". Those are the shortest words in any lyric
+  and they say nothing on a screen; picking by length lands on them every time.
+- If no SINGLE word in the line carries, take the shortest PHRASE that does -- two
+  to four words. Short matters less than legible.
+- The test: printed alone on a poster, would it read as a statement, or as a
+  fragment someone forgot to finish? If the second, it is the wrong choice.
+- Short, but not at the cost of the above. Text on screen is read in a second or
+  not at all -- and an empty word read in a second is still empty.
 - Say where it sits, how it behaves and when it appears.
 """
 
@@ -415,9 +513,9 @@ class MMH3MusicScenePlanPrompt(io.ComfyNode):
             branch = _INSTRUMENTAL if not has_lyrics else ""
             typo_block = ""
             if has_lyrics and typography == "exact lyrics":
-                typo_block = _TYPO_SHOTS_EXACT
+                typo_block = _TYPO_SHOTS_EXACT + _TYPO_TREATMENT
             elif has_lyrics and typography == "text bursts":
-                typo_block = _TYPO_SHOTS_BURST
+                typo_block = _TYPO_SHOTS_BURST + _TYPO_TREATMENT
 
             parts.append(_SHOTS % (
                 i + 1, n, section.strip() or "an unnamed section", secs, secs,

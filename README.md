@@ -440,6 +440,41 @@ lyrics against it, slice the alignment by render window, then write prompts.
   flag a vision model handed pictures and no instruction describes an invented
   character anyway.
 
+#### Observed — 2026-08-15
+
+From a first full music-video run. Recorded because the same wording would be
+re-derived otherwise, and because two of these contradict what a search turns up.
+
+- **Typography rendered flat, "like a single word subtitle".** Two causes, both in
+  the rules rather than the model. *Which* word: `text bursts` said "keep it SHORT",
+  and the shortest word in any lyric is a function word — the output was the word
+  **"much"**. It now requires a burst to mean something standing alone, bans function
+  words by name, and offers a test: printed alone on a poster, does it read as a
+  statement or as a fragment someone forgot to finish? *How* it looked: the rule
+  asked only where the text "sits", which is satisfied by centring it — and centred
+  at readable size **is** the subtitle look. Scale is now the first decision, and the
+  block says outright that mid-sized and centred is the one option that reads as
+  captioning.
+
+- **Thematic type beats a font description.** Letters made of circuit traces for a
+  machine song, vapour and sugar-floss for a candy one. The identity is chosen ONCE
+  in `beats` and inherited by every chunk — chosen per chunk, each invents its own
+  and the video has no design.
+
+- **Split frames and RGB channel split are wanted, not artifacts.** Two places, two
+  times or two framings named inside ONE shot is what makes H3 divide the frame. It
+  was happening as a side effect of shots describing several things at once; it is
+  now stated as a technique to reach for on purpose. The general rule underneath
+  both: **a treatment belongs if the song earns it** — the good emergent effects came
+  from briefs dense enough for the model to reach into their world.
+
+- **Slow motion is a choice here, not a drift.** Community reports describe H3
+  falling into slow motion unbidden, but those cluster around LoRA use (the
+  Realism-People LoRA "adds slow mo at times", lightning LoRAs "struggled with slow
+  motion"). ck has never seen it unasked on this setup, so the prompt treats it as
+  something you ask for. `"live-action video"` at the front of the style sentences is
+  kept as a documented remedy if a chunk ever comes back slower than intended.
+
 ### Sampling
 - **MiniMax H3 Looping Sampler** — fill a whole clip chunk by chunk in one node
   execution. The graph is the same size for 4 chunks or 40, which is the point.

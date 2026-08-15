@@ -9,6 +9,47 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [0.75.1] - 2026-08-15
+
+Prompt text only — no schema change, no rewiring. From the first full music-video run.
+
+### Fixed
+- **Typography rendered flat, like a one-word subtitle.** Two separate rule failures:
+  `text bursts` said "keep it SHORT" with no requirement that the fragment carry
+  meaning, so it picked the shortest word in the line — a function word, observed as
+  **"much"**. And the treatment rule asked only where the text "sits", which is
+  satisfied by centring it, which IS the subtitle look.
+
+  Bursts must now stand alone, function words are banned by name, and there is a
+  concrete test (printed on a poster, statement or unfinished fragment?). Scale is
+  the first decision, with "mid-sized and centred is the single option that looks
+  like captioning" stated outright. Applies to `exact lyrics` too — a whole line
+  centre-frame is just a longer subtitle.
+
+- **Applied the validated kinetic-typography fix from 2026-08-12** rather than
+  re-deriving it: `CHOOSE` the phrase by paraphrase (three words, ALL CAPS), then
+  `RENDER` it as a literal quoted string, with the validity rule that *a prompt
+  describing text moving without quoting the text is invalid*. The earlier failure —
+  "words of devotion cascade in neon", which names no string and makes H3 draw
+  invented glyphs — is named in the prompt so it is recognisable.
+
+- **No typography instructions in `subject_definitions`.** The one rule that survived
+  the review of MiniMax's own MV/subtitle skill: a `<Subject>` line says what an asset
+  IS, and a text directive there leaks into all N chunks because the section is reused
+  byte-identically.
+
+### Added
+- **Typographic identity, chosen once in `beats`** and inherited by every chunk, built
+  from the video's world rather than a font menu.
+- **Frame treatments from the video's world**, on the same principle — an effect
+  belongs if the song earns it. Split frames, RGB channel split and slow motion named
+  as known-good starting points.
+- **Split frames as deliberate technique.** Naming two places, times or framings in one
+  shot is what triggers them; they were arriving as a side effect and are wanted.
+- **A tempo decision per chunk** — slow motion, realtime, or rapid micro-shots — tied
+  to the chunk's measured energy so a peak and a near-silent window do not move at the
+  same speed.
+
 ## [0.75.0] - 2026-08-14
 
 Music video prompt building: a separate chain from the cinematic planner, driven by

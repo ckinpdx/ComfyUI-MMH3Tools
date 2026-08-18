@@ -253,6 +253,19 @@ Those are starting points, not the whole vocabulary -- name the treatment
 explicitly, say how strong it is, and say WHEN it hits. An effect that runs
 continuously stops reading as an effect.
 
+## MOTIVATE THE CUT
+
+A cut lands when something carries across it. Let motion, a moving edge, a light, or
+matched geometry drive the change rather than ending one shot and starting another.
+
+- A hand sweeping left hands off to a curtain sweeping left. A circle becomes a
+  circle. A highlight travelling down a rail becomes a highlight travelling down her
+  arm. Say what carries.
+- The cut is still placed on a word onset or a bar line -- this decides what makes it
+  feel inevitable once it is there.
+- Not every cut needs it. Two or three motivated cuts in a chunk read as design; all
+  of them read as a showreel.
+
 ## CHOOSE A TEMPO FOR THE CHUNK, AND SAY IT
 
 Speed is a decision, and leaving it unmade gets you the model's default rather than

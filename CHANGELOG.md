@@ -9,6 +9,279 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.76.0
+
+### Added
+- **`MMH3ScenePlanPrompt` — new `mode` toggle (append-only): `cinematic` (default) /
+  `talking_head`.** `talking_head` swaps the escalation prompts for an ABSOLUTELY-LOCKED
+  continuous take: the `shots` stage holds one fixed-tripod frame, forbids cuts / camera
+  moves / new action, and writes a continuing spoken monologue instead of advancing a
+  scene. In that mode it does NOT require a `beat_sheet`, `brief` becomes the monologue's
+  topic (`_BRIEF_TH`, "what they talk about" rather than "never speak aloud"), and the
+  continuity block is reworded to "same unbroken shot, carry the monologue forward"
+  (`_CONTINUITY_TH`). Default `cinematic` → existing workflows untouched.
+
+  The talking-head case has no cut to hide the chunk boundary, so it doubles as the
+  cleanest test of whether the looping sampler joins chunks seamlessly at all.
+
+- **`MMH3ScenePlanPrompt` — new `prev_detailed` input (append-only, `shots` stage).**
+  Accepts the previous chunk's `detailed_description` and appends a CONTINUITY block
+  telling the writer to open [Shot 1] on that chunk's FINAL frame -- same positions,
+  poses, injuries, props, camera -- and advance, instead of opening a fresh scene.
+  Wire it from `MMH3PromptAccumulate.prior_context` (mode `last`) through the loop's
+  carried value; empty on beat 0. Optional and LAST in the input list, so existing
+  saved workflows load unchanged; past beat 0 with nothing wired, the node warns in
+  its report.
+
+  Fixes chunk-to-chunk staging drift: the `shots` writer previously saw only the beat
+  SHEET (summaries), never the previous chunk's realised output, so it continued the
+  STORY but re-invented the STAGING -- camera and pose reset at every cut. Verified on
+  a T2V render: later chunks now open "the camera snaps from [the previous chunk's
+  final shot]", and injuries/positions carry monotonically across chunks.
+
+- **`MMH3LoadSkill` — "MMH3 Load Skill", `MMH3Tools/prompt`.** One skill file in, text
+  out, for `extra_rules` on either scene-plan node. Inputs `skill` (combo, populated
+  from `styles/`), `previous` (force_input, for chaining), `enabled`; outputs
+  `extra_rules`, `report`. New node, so no ordering constraint yet.
+
+  Chainable rather than multi-select: selecting several in one node means deciding up
+  front which kinds exist and how many of each you may have, and a chain decides
+  nothing. The type lives in the filename, and `fingerprint_inputs` watches the folder
+  mtimes so editing a skill file re-runs the node instead of serving a cached prompt.
+
+- **`styles/` — 33 skill files.** Four `look-`, six `typography-`, twenty-three
+  `experiment-`, plus `_README.md` (underscore-prefixed files are notes, not skills,
+  and do not appear in the dropdown). The `experiment-` set is deliberately
+  unvalidated — written for what we want to find out H3 can do — and the node flags
+  them as untested in its report so a result is judged on its own.
+
+  Not a port of MiniMax's nine published H3 skills: those are agent procedures for
+  their own hub, wrapped around the visual guidance in numbered steps, confirmation
+  gates and shot counts written for 15-second clips, none of which survives contact
+  with a grid-locked window and a pinned master audio.
+
+- **`MMH3ChunkSchedule` — "MMH3 Chunk Schedule", `MMH3Tools/calculators`.** Inputs
+  `total_seconds`, `window_seconds`, `overlap_seconds`, `prefer`, `chunks`; outputs
+  `total_frames`, `window_frames`, `overlap_frames`, `chunk_count`, `seconds_per_chunk`,
+  `report`. New node, so no ordering constraint yet.
+
+  **The frame calculator converts; nothing solved.** Asking it three times, once per
+  value, cannot see the constraint that matters, because that constraint is a
+  relationship between the three. Observed 2026-08-17: 60s / 20s window / 3s overlap
+  passes every per-value check and produces four chunks whose last strides 7.08s
+  against the others' 17.00s, re-rendering 12.2 seconds that a previous chunk already
+  made under a different prompt. Widget precision is not the bug and fixing it would
+  not have helped.
+
+  With `t = 5c+2`, `L = 5a+2`, `O = 5b+2`, stride is `5(a-b)` — a multiple of 5 for
+  any a and b, so phase safety is free and the five-window pulse cannot occur. The
+  real condition is `(c - a) % (a - b) == 0`, which reduces to small integers, so the
+  solver is a plain sweep rather than anything clever.
+
+  `chunks` pins the count and makes the window a result. That is the number most
+  worth holding an opinion about: prompts written, joins made. An unreachable count
+  is released with a note rather than raised, per the pack's report-never-halt rule.
+
+  **`av_align` — the 40 Hz audio grid.** H3 video runs are `17j+5` frames but audio
+  latents tick at 40 Hz, and only every THIRD run is whole on both: 39, 90, 141, 192,
+  step 51 frames. Off the grid the preserved audio pins to an instant up to a third
+  of a tick (8.3 ms) from the preserved video, at the carry edge and again at every
+  chunk start, since the STRIDE has to be exact too. `ignore` (default) is unchanged
+  and flags when no rung on the ladder aligns; `prefer` ranks aligned schedules
+  first; `require` returns only aligned ones.
+
+  At 60s exactly there is NO aligned schedule at any window or overlap -- its total
+  is 84 groups and alignment needs `2 mod 3` -- so `require` moves the total by one
+  group before it gives up the chunk count, that being the cheaper concession. An
+  earlier ordering released the count first and then honoured it anyway, so the
+  report claimed a release that had not happened.
+
+  Matters when chunks GENERATE their audio; a supplied master track pinned at
+  mask 0 has no per-chunk audio seam to misalign.
+
+  ⚠️ The ladder marks a rung reachable only if its WHOLE schedule qualifies. Marking
+  by the overlap alone offered rungs the solver would never take: under `require` the
+  stride must land on the grid too, which leaves every THIRD rung — 45 latents apart,
+  not 15. Observed 2026-08-17: a 4s overlap request returned 1.62s while the ladder
+  appeared to offer 3.75s. The rows now print their stride and say so.
+
+  The report lists the **reachable overlaps** for the current chunk count. With the
+  total and the count fixed, stride `(c-b)/n` must be whole, so valid overlaps sit `n`
+  groups apart — the chunk count IS the overlap's step size, and more chunks means a
+  COARSER overlap. Observed 2026-08-17: nudging the overlap jumped 17 to 32 latents
+  with nothing between, which is the rule rather than a snapping bug.
+
+  `tests/test_chunk_schedule.py` asserts the property that matters: every schedule it
+  emits is fed back through **MMH3WindowPlan** and must come out with a single
+  stride. The node agreeing with its own arithmetic would prove nothing.
+
+- **`MMH3MotionOverload` — "MMH3 Motion Overload", `MMH3Tools/utils`.** Measures which
+  latent time tokens of a rendered clip carry more motion than one token can
+  represent. Inputs `latent`, `quantile` (0.75), `phase_normalize` (on); outputs
+  `profile_json`, `hot_over_cold`, `report`. New node, so no ordering constraint yet.
+
+  **Why it exists.** `FRAME_PER_TOKEN` is `(1,4,4,4,4)` — four of every five tokens
+  span four pixel frames. When motion is fast enough that those four frames need four
+  distinct poses, one token cannot represent them and the decode smears. The defect is
+  structural, so it does not respond to steps or resolution: the poses were never
+  generated, and re-denoising cannot recover what was never there. The community calls
+  the artefact "roping" and the second-pass fix "de-roping".
+
+  **This is the measurement half only.** It reads a finished latent and reports; it
+  retimes nothing and fixes nothing. Built first, deliberately, because whether this
+  footage has the problem at all is unmeasured here — the material is largely
+  performance to camera, not the backflips and sword arcs the artefact was reported on.
+
+  Method: third difference of the latent along the token axis, `|d3|`, averaged over
+  channels and space, then phase-normalised. Prior art is the jerk oracle in
+  matlowai/ComfyUI-MAINodes (MIT); reimplemented against `common.py`'s
+  `frame_at_latent` rather than copied, and `tests/test_motion_overload.py` asserts
+  our grid agrees with theirs token by token.
+
+  **`phase_normalise()` is reusable and applies beyond this node.** A phase-0 token
+  spans one pixel frame and phases 1–4 span four, so a raw per-token statistic is
+  measuring the grid as much as the signal. Any future per-token score on H3 needs it.
+
+### Changed
+- **#15375 merged upstream 2026-08-18, so the pack now needs NO core patches.**
+  Minimum ComfyUI is `v0.33.0-20-gff6c8a8a`. The Requirements section said "two
+  upstream PRs that are still open" and led with a warning about applying diffs; it
+  now says stock ComfyUI and a version number.
+
+  **#15316 is out of the docs entirely.** It was always listed as needed by "nothing
+  -- optional" (it reserves text-encoder VRAM and removes a minute-long hang when
+  conditioning carries image references). Documenting an optional third-party diff in
+  a Requirements table reads as a requirement. Anyone who wants it can fetch it.
+
+  `docs/core-changes.md`'s PR table is now history rather than instructions, and its
+  fetch-and-apply recipe is scoped to reviving an old build.
+
+  ⚠️ **The merged version is not byte-identical to the PR head.** It pools to the token
+  grid BEFORE quantizing and uses `torch.ceil` where the PR used `torch.round`, so
+  every partial mask value now rounds UP toward generate. 0.0 and 1.0 are unaffected;
+  anything between them is. Re-baseline before comparing a partial-`overlap_strength`
+  run against one made earlier.
+
+### Changed — prompts
+- **`talking_head` shots now REQUIRE the `[Shot 1]` marker.** The rule described the
+  marker -- "[Shot 1] carries NO timestamp… do not write a [Shot 2]" -- without ever
+  asking for one, so the writer took the actionable half and emitted no shot marker at
+  all. `MMH3PromptLint` had been reporting "detailed_description has no [Shot 1]" on
+  every chunk and it was correct.
+
+  `[Shot N]` is how H3 is told where shots begin and end. With no marker anywhere,
+  nothing in the text declares the chunk to be one continuous shot.
+
+- **A continuation chunk may no longer OPEN.** Chunks after the first now carry: the
+  take is already running, no fade in, no cut from black, no light coming up, no
+  camera settling, no reveal. Chunk 0 is untouched -- it IS the opening -- and
+  cinematic mode is untouched.
+
+  Observed 2026-08-17 on `stream_00159`/`00160`: at the first generated frame of chunk
+  1, luma fell **97% in a single frame** (0.7627 -> 0.0240) and recovered over ~3 s
+  with the subject's neon circuitry the brightest thing in frame -- H3 opening the
+  chunk like a new shot. The carried head measured +1.5% against baseline, so the pin
+  was holding; the model simply treated the clip start as a place to make an entrance.
+
+  ⚠️ **Not proven to be the whole cause.** Chunk 2's boundary in the same renders is
+  clean (-0.0002), with the same missing marker and the same carry, so something
+  chunk-1-specific is also involved. These rules close a real gap in the instructions;
+  they are not established as the cure.
+
+### Fixed — documentation
+- **The feather's recorded MECHANISM was wrong; the decision was not.** 0.72.2 and
+  0.73.0 explained the noisy seam as `rows_t = 1 - m*sigma` and the content blend
+  `x*m + orig*(1-m)` corresponding "only approximately". Re-read against core
+  2026-08-17, they correspond closely, and since #15375 merged
+  `scale_latent_inpaint` pre-compensates so every pixel lands at its token's pooled
+  strength BY CONSTRUCTION. Whatever caused that seam, it was not this.
+
+  Corrected in `docs/looping-sampler.md`, `MMH3LoopingSampler`'s docstring and
+  `MMH3OutpaintLatent`'s. `feather_latents` stays removed -- setting it to 0 removed a
+  visible seam, and that observation is untouched. The CHANGELOG entries that first
+  recorded it are left as written; they are history.
+
+- **Dropped the `>=0.995 -> 1.0` / `<=0.05 -> 0.0` snapping claim from the README.**
+  True of the PR, removed upstream on 2026-08-15, and it was being used to argue that
+  hard masks are safe.
+
+- **`MMH3WindowPlan`'s outputs now carry their units in their names.**
+  `context_length` -> `context_length (latents)`, `context_overlap` ->
+  `context_overlap (latents)`, and the frame-domain outputs gain `(frames)` to match.
+  **Display names only — slot ORDER is unchanged, and links serialise by slot index,
+  so saved workflows are unaffected.**
+
+  Observed 2026-08-17: `context_length` (117 latents) wired into the looping sampler's
+  `chunk_frames`, which takes frames. Nothing errored — 117 is a legal frame count —
+  it re-snapped to 32 latents and the sampler ran **11 chunks of 4.46s with a 0.21s
+  carry** while Chunk Schedule and Window Plan both reported 3 chunks of 16.50s. The
+  latent pair and the frame pair sit five sockets apart because the frame outputs were
+  appended later, which is what makes them easy to cross.
+
+### Fixed
+- **A prompt nested inside its own `detailed_description`.** Observed 2026-08-17: chunk
+  0 was clean, every chunk after it contained a complete six-section prompt spliced
+  into its own body, with a second `overall_soundscape` / `non_diegetic_music` pair
+  trailing after. It rendered without erroring anywhere.
+
+  Cause: `_CONTINUITY_TH` opens "Below is the PREVIOUS chunk's detailed_description",
+  but the thing the pack tells you to wire into `prev_detailed` -- `MMH3PromptAccumulate`'s
+  `prior_context` -- emits a whole prompt, since it returns the last piece split on
+  `|`. Shown a complete prompt under a label calling it one section, the writer
+  matched the format it was given and returned a complete prompt. Chunk 0 escaped
+  because it has no prior context to imitate. The pack was contradicting itself: the
+  docstring said to wire exactly the thing the label misdescribes.
+
+  **`prev_detailed` now extracts `detailed_description`** from whatever it is handed
+  (`_prev_body`), passes a bare body through untouched, and reports when it reduced a
+  full prompt. This also stops the payload growing: re-sending every earlier prompt in
+  full is the bloat `prior_context` exists to avoid.
+
+- **`MMH3ReplaceSection` now refuses a replacement that is itself a prompt.** Two or
+  more of the format's own section headers in the `replacement` means a whole prompt
+  in the wrong socket, and splicing it nests a prompt inside one of its own sections.
+  Two headers rather than one, so prose that happens to mention a field name still
+  passes. The message names the likely cause -- a writer shown a complete prompt as
+  its example -- rather than only the symptom.
+
+  This is a different failure from the missing-section case above it: nesting needs
+  every header PRESENT, so it went down the accepted path both before and after the
+  insert change.
+
+- **`MMH3ReplaceSection` refused a definitions skeleton — "no section to replace".**
+  The three-stage design depends on the definitions LLM emitting *empty* `summary:`
+  and `detailed_description:` headers, and models resist writing a header with nothing
+  under it. So the stage that is supposed to open the format produced four sections
+  out of six and the splice raised.
+
+  It now **inserts** a missing header at its canonical position instead of refusing.
+  That is not guesswork: the Ref2VA order is fixed, so an absent section has exactly
+  one place it can go, and the report names every insertion rather than doing it
+  silently.
+
+  Guarded by a **half** threshold — below three of six the input is refused. A report,
+  a stray paragraph or the refiner's output wired in by mistake can contain one
+  accidental `summary:`, and "recovering" that into a five-section skeleton would
+  manufacture a prompt out of nothing. Verified at the boundary: bare prose, a report
+  with one header, and two of six all refuse; three and four of six insert and report.
+
+  `tests/test_lint.py` had asserted on the word "missing" in the old refusal text and
+  was updated to the new message.
+
+- **A flat profile reported infinite separation instead of none.** `contrast()`
+  divided by a zero baseline when every token scored the same, so the strongest
+  possible "nothing here" came back as `inf` — exactly backwards for a node whose
+  purpose is to say when there is nothing to find. A flat profile now returns
+  `(1.0, 1.0)` and the report names it. Genuine unbounded separation still returns
+  `inf` and renders as the word "unbounded"; `profile_json` emits `null` for it, since
+  `json.dumps` would otherwise write a bare `Infinity` that strict parsers reject.
+  Caught by the test's static-footage case, which is why that case exists.
+
+  MAINodes documents the same limit as "the oracle can rank but cannot abstain". The
+  contrast ratios are this pack's answer to it, and they are the numbers to read —
+  the quantile marks a fixed share of tokens hot no matter what it is given, so the
+  spans alone are never evidence.
+
 ## [0.75.1] - 2026-08-15
 
 Prompt text only — no schema change, no rewiring. From the first full music-video run.

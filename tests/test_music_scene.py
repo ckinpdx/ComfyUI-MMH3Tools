@@ -89,6 +89,14 @@ check("typography cannot leak into subject_definitions",
       "NO TYPOGRAPHY INSTRUCTIONS IN HERE" in dt, True)
 check("...because it would reuse in every chunk", "leak into every chunk" in dt, True)
 
+# from brand-promo-video-generator, the one portable idea in the three format skills
+mc = run("shots", beat_index=0, lyrics=LY, shot_times=TIMES, beat_sheet="a")[0]
+check("cuts are motivated by something carrying across",
+      "MOTIVATE THE CUT" in mc and "Say what carries" in mc, True)
+check("...without displacing the onset placement",
+      "word onset or a bar line" in mc, True)
+check("...and not on every cut", "read as a showreel" in mc, True)
+
 check("typography off says nothing about design",
       "NOT A SUBTITLE" in run("shots", beat_index=0, lyrics=LY, shot_times=TIMES,
                               beat_sheet="a")[0], False)

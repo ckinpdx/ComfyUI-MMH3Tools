@@ -263,8 +263,10 @@ class MMH3OutpaintLatent(io.ComfyNode):
     ⚠ THE GRADED TREATMENT IS NOT AUTOMATICALLY BETTER. Observed 2026-08-13 on the
     looping sampler's `feather_latents`: a ramp on the new core makes the seam NOISY.
     Each ramp cell gets its own timestep (rows_t = 1 - m*sigma) while the sampler
-    blends its CONTENT as x*m + orig*(1-m); the two correspond only approximately, so
-    the ramped band is rows whose label does not match what they hold. On the OLD core
+    the two are now reconciled by core: scale_latent_inpaint pre-compensates so
+    every pixel lands at its token's pooled strength. The feather was removed in
+    0.73.0 on the evidence, and that stands -- but the mechanism recorded for it
+    did not survive re-reading (see CHANGELOG 0.76.0). On the OLD core
     the ramp was binarised at 0.5, which was cruder but self-consistent.
 
     Treat a non-zero feather as suspect on a current core. If the margin shows,

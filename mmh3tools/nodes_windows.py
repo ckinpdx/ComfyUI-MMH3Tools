@@ -653,11 +653,13 @@ class MMH3WindowPlan(io.ComfyNode):
                 ),
             ],
             outputs=[
-                io.Int.Output(display_name="context_length"),
-                io.Int.Output(display_name="context_overlap"),
+                # units in the name: these two are LATENTS and their frame-domain
+                # twins sit five sockets below, which is how they get crossed
+                io.Int.Output(display_name="context_length (latents)"),
+                io.Int.Output(display_name="context_overlap (latents)"),
                 io.Int.Output(display_name="window_count"),
-                io.Int.Output(display_name="total_frames"),
-                io.Int.Output(display_name="total_latents"),
+                io.Int.Output(display_name="total_frames (frames)"),
+                io.Int.Output(display_name="total_latents (latents)"),
                 io.String.Output(display_name="report"),
                 # APPENDED LAST -- outputs serialise positionally too.
                 # Under windowing the layout is rebuilt per window from the WINDOW's
@@ -665,7 +667,7 @@ class MMH3WindowPlan(io.ComfyNode):
                 # nodes) needs this, not total_frames. minimax_frame_count is NOT
                 # patched per window, so passing the clip length puts a last-frame
                 # anchor at the end of every window instead of the end of the clip.
-                io.Int.Output(display_name="window_frames"),
+                io.Int.Output(display_name="window_frames (frames)"),
                 # frame_at_latent, NOT latents_to_frames: an overlap of 0 is legal and
                 # 0 is off the 5j+2 grid, so the latter floors to the group below and
                 # emits -12 frames. frame_at_latent is the general form and gives 0.
@@ -674,7 +676,7 @@ class MMH3WindowPlan(io.ComfyNode):
                 # silently re-snaps a latent count as a frame count and the splitter's
                 # schedule stops matching this plan -- which reads as the model ignoring
                 # the prompt, since each window then describes audio it never renders.
-                io.Int.Output(display_name="overlap_frames"),
+                io.Int.Output(display_name="overlap_frames (frames)"),
             ],
         )
 

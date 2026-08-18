@@ -814,6 +814,28 @@ class MMH3ReplaceSection(io.ComfyNode):
                 "from MMH3 Task System Prompt so the two cannot disagree."
                 % (section, mode, ", ".join(sections)))
 
+        notes = []
+
+        # A REPLACEMENT carrying the format's own headers is a whole prompt in the
+        # wrong socket, not a section body. Splicing it in nests a prompt inside its
+        # own section and the result renders without ever erroring -- observed
+        # 2026-08-17, three chunks deep, from a writer that had been shown a complete
+        # prompt as its continuity example and copied the format. Two headers, not
+        # one: a body may legitimately mention a field name in prose.
+        rep_headers = [name for name in sections if _section(replacement, name, sections)
+                       is not None]
+        if len(rep_headers) >= 2:
+            raise ValueError(
+                "the replacement for %r is itself a prompt -- it carries %d of the %d "
+                "%s section headers (%s). A replacement is ONE section's body, so "
+                "splicing this in would nest a whole prompt inside %r. The writer was "
+                "almost certainly shown a complete prompt as an example and copied it: "
+                "check what reaches its system prompt, and wire continuity through "
+                "MMH3 Scene Plan Prompt's `prev_detailed` (which extracts the one "
+                "section) rather than concatenating a prior prompt by hand."
+                % (section, len(rep_headers), len(sections), mode,
+                   ", ".join(rep_headers), section))
+
         bodies, missing = {}, []
         for name in sections:
             b = _section(prompt, name, sections)
@@ -821,13 +843,30 @@ class MMH3ReplaceSection(io.ComfyNode):
                 missing.append(name)
             bodies[name] = b or ""
         if missing:
-            raise ValueError(
-                "the ORIGINAL prompt is missing %s, so there is nothing to splice into. "
-                "This input wants the complete prompt from the first LLM call, not the "
-                "refiner's output." % ", ".join(missing))
+            # A section the writer left out is RECOVERABLE, and refusing here was
+            # costing whole runs. The format fixes the order, so an absent header has
+            # exactly one correct position -- inserting it empty loses nothing and is
+            # not a guess. What is NOT recoverable is a prompt with no sections at
+            # all: that is the refiner's output, or a report, wired in by mistake.
+            # HALF, not all: a report or a stray paragraph can contain one header
+            # by accident, and "recovering" that into a five-section skeleton would
+            # manufacture a prompt out of nothing. A real skeleton always carries the
+            # sections the writer actually filled in.
+            if len(sections) - len(missing) < len(sections) / 2.0:
+                raise ValueError(
+                    "the prompt is missing %d of the %d %s sections (%s), which is "
+                    "too many to be a prompt with headers left out -- it is a report, "
+                    "a bare paragraph, or the refiner's output wired in by mistake. "
+                    "This input wants the complete prompt from the first LLM call."
+                    % (len(missing), len(sections), mode, ", ".join(missing)))
+            notes.append("inserted %d missing section%s: %s. The writer omitted "
+                         "%s -- models resist emitting a header with nothing under "
+                         "it, and the format decides where it belongs."
+                         % (len(missing), "" if len(missing) == 1 else "s",
+                            ", ".join(missing),
+                            "it" if len(missing) == 1 else "them"))
 
         new = (replacement or "").strip()
-        notes = []
         # code fences
         if new.startswith("```"):
             new = re.sub(r"^```[a-zA-Z]*\n?|```$", "", new).strip()

@@ -7,50 +7,45 @@ Requires ComfyUI **v0.30.0+** (native H3 support).
 
 ## Requirements
 
-Beyond stock ComfyUI, parts of this pack depend on **two upstream PRs that are still
-open**, plus one that has since merged and is now simply a minimum ComfyUI version.
-Read this before filing a bug — most "it did nothing" reports are a missing diff.
+**Stock ComfyUI, `v0.33.0-20-gff6c8a8a` or newer.** No patches, no carried diffs.
 
-| PR | needed by | without it |
+Everything this pack needed from upstream has now merged:
+
+| PR | merged | needed by |
 |---|---|---|
-| **[#15375](https://github.com/Comfy-Org/ComfyUI/pull/15375)** per-row masking | `MMH3SeedOverlap`, latent outpaint, and **`MMH3LoopingSampler` with `carry="mask"`** — the default | `MMH3SeedOverlap` **refuses to run**. The looping sampler does **not** — a hard mask has no effect at all, so the carry preserves nothing and every chunk starts cold, and an *intermediate* mask value artifacts instead. See the warning below. |
-| ~~#15439~~ **merged upstream 2026-08-13** | `MMH3LoopingSampler` with `carry="keyframe"`, and any use of `keyframes` | Nothing to apply — but you need a ComfyUI **newer than `v0.33.0`**. On anything older, both **refuse to run**: stock raises on any anchor that is not first/last. |
-| **[#15316](https://github.com/Comfy-Org/ComfyUI/pull/15316)** VRAM reservation | nothing — optional | The minute-long hang when conditioning carries image references. |
+| [#15375](https://github.com/Comfy-Org/ComfyUI/pull/15375) per-token masking | 2026-08-18 | `MMH3SeedOverlap`, latent outpaint, and **`MMH3LoopingSampler` with `carry="mask"`** — the default |
+| [#15439](https://github.com/Comfy-Org/ComfyUI/pull/15439) guides at any frame | 2026-08-13 | `MMH3LoopingSampler` with `carry="keyframe"`, and any use of `keyframes` |
 
-> ⚠️ **The one silent failure.** `carry="mask"` is the looping sampler's default and it
-> is *not* gated: without #15375 the mask is accepted and ignored, preserved rows still
-> run at the generation timestep, and you get seams with no error anywhere. Everything
-> else in this pack refuses rather than pretending. If chunks are not carrying, check
-> this first.
->
-> #15375 is **three** changes, not one — the mask reaching the model as a cond, the
-> per-row timesteps, and a `scale_latent_inpaint` override on `MiniMaxH3` that stock
-> does not have. The third only matters for *intermediate* mask values, where it shows
-> up as artifacting rather than as nothing happening. Full account under
-> [Latent joins happen in pixel space](#latent-joins-happen-in-pixel-space).
+On an older ComfyUI the pack does not pretend. `MMH3SeedOverlap` and the keyframe path
+**refuse to run**, and the looping sampler checks before it starts.
 
-Both remaining PRs now apply **clean** — #15375 was rebased onto the merged #15439,
-so the hand-merge that used to be required is gone. A script that fetches the diffs
-fresh is in [`docs/core-changes.md`](docs/core-changes.md); re-fetch rather than
-reusing a saved copy, since these get rebased (which is exactly what happened here).
+> ⚠️ **One exception, and it is the default path.** `carry="mask"` is *not* gated on
+> older cores: the mask is accepted and ignored, preserved rows still run at the
+> generation timestep, and you get seams with no error anywhere. If chunks are not
+> carrying, check your ComfyUI version first. `per_row_mask_is_continuous()` reports
+> what the installed core actually does.
 
-### One runtime patch, applied automatically
+What #15375 gives the pack is three things, not one: the mask reaches the model as a
+cond, preserved rows run at the cond timestep, and `MiniMaxH3` gets a
+`scale_latent_inpaint` override that stock `BaseModel` has no equivalent for. The
+third only matters for *intermediate* mask values. Full account under
+[Latent joins happen in pixel space](#latent-joins-happen-in-pixel-space).
 
-`mmh3tools/patch_guide_origin.py` wraps `PackedLayout` at import — **no core edit, and
-it survives `git pull`.** ⚠ **Obsolete on current core:** the merged #15439 anchors the
-guide correctly by itself, so the wrap's self-test finds nothing to fix and stands down
-(`is_applied()` returns False, and the log says so). It stays for anyone on an older
-ComfyUI. What follows describes what it does when it *is* needed.
+### One runtime patch, inert on current core
 
-The **draft** #15439 anchored a guide at `text_len`, but the target does not
-begin there: references advance a cursor first, so every guide lands *before* the clip
-it is meant to anchor — measured at −1 for one image ref, −320 for an audio ref, −321
-for both. Nothing errors; the guide just lands in the reference region, and a carried
-tail's audio goes early with it.
+`mmh3tools/patch_guide_origin.py` wraps `PackedLayout` at import — no core edit, and it
+survives `git pull`. **On any ComfyUI new enough to run this pack it does nothing:**
+merged #15439 anchors the guide correctly by itself, so the wrap's self-test finds
+nothing to fix, rolls back, and logs that it stood down. `is_applied()` returning
+False is the success case.
 
-No PR carries this fix, which is why it is a wrap rather than a diff. The looping
-sampler asks `is_applied()` and **refuses** when a chunk carries both a reference and a
-keyframe on an unpatched build, rather than rendering a misplaced anchor.
+It remains because the failure it prevents is silent. The **draft** #15439 anchored a
+guide at `text_len`, but the target does not begin there — references advance a cursor
+first, so a guide landed *before* the clip it was meant to anchor, measured at −1 for
+one image ref and −321 for image+audio. Nothing errored; the guide just landed in the
+reference region and a carried tail's audio went early with it. The looping sampler
+asks `is_applied()` and refuses when a chunk carries both a reference and a keyframe on
+a build that needs the fix and lacks it.
 
 ## Why this exists
 
@@ -321,7 +316,8 @@ for any node is in its tooltip.
   Scene Plan (beats)       -> LLM ------------------------> beat sheet
     for i in 0..N-1:
       Prompt Part(beat sheet, i) ------------------------->  beat i
-      Scene Plan (shots, beat_index=i, beat_sheet=...) -> LLM -> shots i
+      Prompt Accumulate(carried).prior_context (mode last) -> prev chunk's detailed
+      Scene Plan (shots, beat_index=i, beat_sheet=.., prev_detailed=..) -> LLM -> shots i
       Replace Section(skeleton, beat i,  "summary")
       Replace Section(     ^  , shots i, "detailed_description")
       Prompt Accumulate -> pipe-separated string -> MMH3 Reference (Multi-Prompt)
@@ -332,6 +328,27 @@ for any node is in its tooltip.
   multi-prompt use, tolerates the code fences an LLM adds anyway, and past the end
   either repeats the last beat (matching how the looping sampler reuses the last cond)
   or raises, your choice.
+
+  **Chunk-to-chunk continuity** (`prev_detailed`, optional, append-only input). By
+  default the `shots` writer sees only the beat *sheet* — the summaries — never the
+  previous chunk's realised output, so it continues the story but re-invents the
+  staging, and a cut-to-cut render resets the camera and poses every chunk. Wire the
+  loop's carried prompts back through **MMH3 Prompt Accumulate**'s `prior_context`
+  output in mode **`last`** into `prev_detailed`, and each chunk is told to open
+  [Shot 1] on the previous chunk's FINAL frame and advance — so chunk *i+1* picks up
+  where chunk *i* ended (same positions, injuries, camera) instead of opening cold.
+  Empty on beat 0; unwired past beat 0, the node warns. This is the cinematic opposite
+  of the music-video path's `last_definitions`, which withholds `detailed_description`
+  on purpose because there the windows must *differ*.
+
+  **`mode`: `cinematic` (default) / `talking_head`.** `talking_head` repurposes the same
+  machinery for one ABSOLUTELY-LOCKED continuous take — a person speaking to camera. The
+  `shots` stage holds a fixed-tripod frame (no cut, no camera move, no new action),
+  writes a continuing spoken monologue instead of escalating, needs no `beat_sheet`, and
+  reads `brief` as the topic the subject talks *about*. Definitions and the continuity
+  feed carry over unchanged. Because there is no cut at the chunk boundary to hide a
+  seam, it is also the strictest test of whether the looping sampler joins chunks
+  seamlessly.
 
   The `shots` stage refuses to run without a `beat_sheet` rather than quietly writing
   a self-contained chunk — that failure is the one this exists to remove. Its banality
@@ -440,6 +457,28 @@ lyrics against it, slice the alignment by render window, then write prompts.
   flag a vision model handed pictures and no instruction describes an invented
   character anyway.
 
+- **MMH3 Load Skill** — loads one file from the pack's `styles/` folder and emits it
+  for `extra_rules` on either scene-plan node. **Chain the nodes to stack skills**:
+  wire one node's output into the next node's `previous`, so wiring order is stacking
+  order. `enabled` off passes `previous` through untouched.
+
+  One file per node on purpose. Selecting several in one node means deciding up front
+  which kinds of skill exist and how many of each you may have; a chain decides
+  nothing. The type lives in the filename — `look-`, `typography-`, `experiment-` —
+  which is enough to find it in the dropdown, and anything you drop in the folder
+  appears there with no registration step.
+
+  An `experiment-` file is flagged in the report as untested: those say what we want
+  to find out H3 can do, not what has been observed working, so judge the result on
+  its own rather than as a known recipe.
+
+  **Why blocks and not the vendor skills.** MiniMax publish nine H3 skills; all nine
+  are agent procedures for their own hub, and two say so outright. Around their visual
+  guidance sits numbered steps, confirmation gates, prescribed shot counts and time
+  segments written for 15-second clips. Pasted whole into a prompt, that fights a
+  grid-locked window and a pinned master audio. `styles/` is the visual core lifted
+  out with the procedure left behind.
+
 #### Observed — 2026-08-15
 
 From a first full music-video run. Recorded because the same wording would be
@@ -524,14 +563,56 @@ re-derived otherwise, and because two of these contradict what a search turns up
   fp32 latent), and `accumulator_device: cpu` hosts the remaining accumulators in
   system RAM, writing window-sized slices across PCIe during the loop and moving
   the fused result back once per step. Values are identical either way.
+- **MMH3 Chunk Schedule** — say roughly what you want; get a schedule that actually
+  tiles. Solves total, window and overlap **together** and emits frames.
+
+  The frame calculator answers "what does 22.2 seconds round to". Useful, and not the
+  question. Three of those answers chosen independently still leave the last window
+  clamped, because what has to hold is a relationship *between* the three: 60s with a
+  20s window and 3s overlap gives four chunks whose last one strides 7.08s instead of
+  17.00s, re-rendering 12.2 seconds a previous chunk already made under a different
+  prompt. No single conversion can see that, so no amount of widget precision fixes it.
+
+  Write the group counts as `t = 5c+2`, `L = 5a+2`, `O = 5b+2`. Then stride is
+  `5(a-b)`, a multiple of 5 for **any** a and b — so grid phase is safe automatically
+  and the five-window pulse cannot happen. What is not automatic is
+  `(c - a) % (a - b) == 0`, and that is the whole search.
+
+  **`chunks` is usually the input you actually have an opinion about** — it is how many
+  prompts you write and how many joins the piece has. Set it and the window becomes a
+  *result* rather than a second guess. An unreachable count is released and reported,
+  never raised.
+
+  **`chunk_count` and `seconds_per_chunk` wire straight into either scene-plan
+  node's inputs of the same names**, so the writer and the schedule cannot disagree
+  about how many chunks there are or how long one is. `seconds_per_chunk` is the
+  WINDOW's duration, not the clip's.
+
+  `prefer` decides what may move: `keep total` holds the deliverable length and shifts
+  the window and overlap, `nearest` lets the length drift a few groups for a closer
+  fit, `fewer chunks` takes the shortest chunk list it can. The report names every
+  move and prints the divisibility as proof.
+
+  It also lists the **reachable overlaps** for the chunk count you are on, because
+  the count is the overlap's step size: with the total and the count both fixed the
+  stride is `(c-b)/n` and must come out whole, so valid overlaps sit exactly `n`
+  groups apart. At 3 chunks that is 2, 17, 32, 47 latents and nothing between — which
+  reads as the widget refusing to move until you know why. Asking for MORE chunks
+  makes the overlap COARSER, not finer.
 - **MMH3 Window Plan** — resolve the whole schedule up front, in frames. How many
   windows you get is how many prompts to write; whether your window and overlap
   survive snapping is otherwise only knowable by running a generation.
 
-  `context_length` / `context_overlap` are **latents**, for Context Windows.
-  `window_frames` / `overlap_frames` are **frames**, for Split Audio to Windows.
-  Crossing them re-snaps a latent count as a frame count and the two schedules
-  quietly diverge.
+  **Every output carries its unit in its name**, because crossing them is the one
+  mistake this node invites: `context_length (latents)` / `context_overlap
+  (latents)` go to Context Windows, while `window_frames (frames)` /
+  `overlap_frames (frames)` go to the looping sampler and Split Audio to Windows.
+  The frame pair sits five sockets below the latent pair, which is exactly how they
+  get swapped. Crossing them does not error — a latent count is a valid frame
+  count, just a much smaller one — it re-snaps and the schedules quietly diverge.
+  Observed 2026-08-17: `context_length` 117 wired into the sampler's `chunk_frames`
+  re-snapped to 32 latents, so the sampler ran **11 chunks of 4.5s** while both
+  planners reported 3 chunks of 16.5s.
 - **MMH3 Split Audio to Windows** — cut a track into one clip per window, matching
   the real schedule including the overlap and the clamped final window. The numbered
   sockets fan every window across the graph at once; the `audio` output emits ONE,
@@ -625,7 +706,7 @@ DAC/BigVGAN latents do not blend.
 >    Verified against the class directly — stock `MiniMaxH3` has no such method.
 >
 > (3) is the one that shows up as artifacting, and it is confined to **intermediate**
-> mask values: #15375 thresholds ≥0.995 to 1.0 and ≤0.05 to 0.0, so a hard 0/1 mask
+> mask values. A hard 0/1 mask is unaffected either way; only intermediate ones
 > takes the same path either way. That is why the seam noise in 0.72.x tracked
 > `feather_latents` and vanished when the feather was removed in 0.73.0 — a feather
 > was the only thing in the pack producing intermediate values at
@@ -729,6 +810,20 @@ the result is usable.
 ### Util
 - **MMH3 Latent Info** — shapes, frame count, audio-length mismatch, grid
   alignment, mask presence.
+- **MMH3 Motion Overload** — which latent time tokens of a **rendered** clip carry
+  more motion than one token can represent. Four of every five tokens span four
+  pixel frames, so when fast motion needs four distinct poses in those frames, one
+  token cannot hold them and the decode smears; the poses were never generated, which
+  is why the artefact does not answer to steps or resolution. Third difference along
+  the token axis, phase-normalised for the `(1,4,4,4,4)` grid, reported as hot spans
+  in tokens, frames and seconds.
+
+  **Read the contrast ratios, not the spans.** A quantile threshold marks a fixed
+  share of tokens whatever it is handed, so the profile *ranks* and does not *detect*.
+  `hot / cold mean` near 1.00 means the cut separated nothing, and a flat profile is
+  reported as having no variation rather than as infinite separation. This is a
+  measurement, not a fix — it tells you whether the footage has the problem before
+  anything gets built on the answer.
 - **MMH3 Cond Set Spread** — spread a cond_set's N prompts across a windowed
   generation, so each window gets the one written for it. Regions are cut per window
   midpoint; guess the prompt count low and windows share a prompt, guess high and the

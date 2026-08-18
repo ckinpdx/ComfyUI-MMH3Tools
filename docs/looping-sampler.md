@@ -129,13 +129,16 @@ There was a `feather_latents` input: a linear ramp on the video mask over N late
 after the carried region, easing back to full generation rather than stepping at the
 seam. **It made the seam noisier, and it is gone.**
 
-Observed 2026-08-13. A ramp writes intermediate mask values. Those used to be
-binarised at 0.5, so the ramp merely moved the preserve/generate boundary and every
-row was cleanly one state or the other — crude, but self-consistent. Since #15375 was
-rebased each ramped cell gets its own timestep, `rows_t = 1 − m·σ`, while the sampler
-blends its **content** as `x·m + orig·(1−m)`. The two correspond only approximately,
-so the ramped band is rows whose label does not match what they hold — and that band
-is the seam it was supposed to smooth.
+Observed 2026-08-13, and the observation stands: setting the feather back to 0
+removed a visible seam. **The mechanism first recorded for it does not.** That
+account said the per-row timestep `rows_t = 1 − m·σ` and the content blend
+`x·m + orig·(1−m)` corresponded only approximately, leaving a band of rows whose
+label did not match what they held.
+
+Re-read against core on 2026-08-17, they correspond closely — and since #15375
+merged, `scale_latent_inpaint` pre-compensates so every pixel lands at its token's
+pooled strength *by construction*. Whatever made that seam, it was not this. The
+input is still gone, on the evidence rather than the theory.
 
 It was removed rather than defaulted to 0 and documented, because an input whose only
 correct value is its default is a trap. The carried region is pinned hard and the

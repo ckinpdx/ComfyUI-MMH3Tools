@@ -251,10 +251,15 @@ check("window_frames is the window, not the clip", WF, 124)
 # APPEND-ONLY: outputs serialise positionally, so a new one goes on the END and the
 # existing order never changes. Pinning the whole list rather than just the last entry,
 # since appending a second output is exactly what made the old check pass wrongly.
+# RENAMES are fine and this list moves with them -- links serialise by slot INDEX, not
+# by name, so a saved workflow survives a rename but not a reorder. The units in these
+# names are load-bearing: the latent pair and the frame pair are five sockets apart and
+# crossing them silently re-snaps (see CHANGELOG 0.76.0).
 check("output order is append-only",
       [o.display_name for o in PLAN.define_schema().outputs],
-      ["context_length", "context_overlap", "window_count", "total_frames",
-       "total_latents", "report", "window_frames", "overlap_frames"])
+      ["context_length (latents)", "context_overlap (latents)",
+       "window_count", "total_frames (frames)", "total_latents (latents)",
+       "report", "window_frames (frames)", "overlap_frames (frames)"])
 
 # the emitted values have to survive the node they feed, or the plan is a lie
 C.create_prepare_sampling_wrapper = lambda m: None

@@ -607,10 +607,16 @@ class MMH3LoopingSampler(io.ComfyNode):
                  for w in windows]
         n = len(windows)
 
+        # the carry settings belong in the SUMMARY, not just the widgets: without
+        # them two runs are indistinguishable in the log, and comparing a render
+        # against an earlier one is exactly what diagnosing carry drift needs
         lines = ["%d chunk%s of %d latents (%d frames) over %d frames (%.2fs), "
                  "overlap %d latents (%d frames)"
                  % (n, "" if n == 1 else "s", length, latents_to_frames(length),
-                    total_f, total_f / float(FPS), overlap, ov_frames)]
+                    total_f, total_f / float(FPS), overlap, ov_frames),
+                 "carry %s, strength video %.2f / audio %.2f, noise seed %s"
+                 % (carry, float(overlap_strength_video), float(overlap_strength_audio),
+                    getattr(noise, "seed", "?"))]
         if prior_t:
             lines.append("prior: %d latents (%d frames, %.2fs) kept verbatim; generating "
                          "from frame %d, carrying %d frames of it"
@@ -838,8 +844,10 @@ def _carry_mask(sub_v, sub_a, carried, carried_a, strength_v, strength_a,
     There is deliberately NO feather. A ramp of intermediate mask values makes the
     seam NOISY on a core with the rebased #15375: each ramped cell gets its own
     timestep (rows_t = 1 - m*sigma) while the sampler blends its content as
-    x*m + orig*(1-m), and the two correspond only approximately, so the ramped band
-    is rows whose label does not match what they hold. Observed 2026-08-13; the
+    the two are now reconciled by core: scale_latent_inpaint pre-compensates so
+    every pixel lands at its token's pooled strength. The feather was removed in
+    0.73.0 on the evidence, and that stands -- but the mechanism recorded for it
+    did not survive re-reading (see CHANGELOG 0.76.0). Observed 2026-08-13; the
     `feather_latents` input was removed in 0.73.0 rather than left as a trap.
     """
     packed = _sliced_mask(sub_v, sub_a, in_v, in_a, v0, v1, a0, a1)

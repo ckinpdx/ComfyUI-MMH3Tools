@@ -370,12 +370,25 @@ try:
     RS.execute("no sections here", "[Shot 1] x", "detailed_description", "Ref2VA")
     check("a non-prompt original is refused", False, True)
 except ValueError as e:
-    check("a non-prompt original is refused", "missing" in str(e), True)
+    check("a non-prompt original is refused", "too many to be a prompt" in str(e), True)
 try:
     RS.execute(CLEAN, "x", "integrated_multimodal_description", "Ref2VA")
     check("a section from the other format is refused", False, True)
 except ValueError as e:
     check("a section from the other format is refused", "not part of" in str(e), True)
+
+print("\nReplaceSection refuses a whole prompt as the replacement")
+_FULL = ("subject_definitions:\nA\n\nsummary:\nB\n\nretention_analysis:\nC\n\n"
+         "detailed_description:\nBODY\n\noverall_soundscape:\nD\n\nnon_diegetic_music:\nE")
+try:
+    RS.execute(_FULL, _FULL, "detailed_description", "Ref2VA")
+    check("nested prompt refused", False, True)
+except ValueError as e:
+    check("nested prompt refused", "is itself a prompt" in str(e), True)
+ok = RS.execute(_FULL, "a plain new body", "detailed_description", "Ref2VA").result[0]
+check("a real section body still splices", "a plain new body" in ok, True)
+ok = RS.execute(_FULL, "she reads the summary: aloud", "detailed_description", "Ref2VA").result[0]
+check("one header in prose is not a prompt", "reads the summary" in ok, True)
 
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

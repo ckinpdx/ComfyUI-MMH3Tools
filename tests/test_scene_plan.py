@@ -198,5 +198,37 @@ print("\n13. defaults line up with the nodes on either side")
 check("PromptPart's separator splits Accumulate's default ' | '",
       PART.execute("a | b | c", 2).result[0], "c")
 
+print("\nprev_detailed: a whole prompt is reduced to its detailed_description")
+from mmh3tools.nodes_scene import _prev_body
+FULL = ("subject_definitions:\nA\n\nsummary:\nB\n\nretention_analysis:\nC\n\n"
+        "detailed_description:\nTHE BODY\n\noverall_soundscape:\nD\n\nnon_diegetic_music:\nE")
+body, note = _prev_body(FULL)
+check("pulls the one section", body, "THE BODY")
+check("and says it did", bool(note), True)
+body, note = _prev_body("a bare shot description")
+check("a bare body passes through", body, "a bare shot description")
+check("with no note", note, None)
+check("empty stays empty", _prev_body("")[0], "")
+
+print("\nthe continuity block gets the BODY, never the whole prompt")
+sysp = PLAN.execute("shots", "a brief", 3, 8.0, 1, "", "defs", "", FULL, "talking_head").result[0]
+check("body reached the prompt", "THE BODY" in sysp, True)
+check("the six-section skeleton did NOT", "retention_analysis:" in sysp.split("PREVIOUS CHUNK")[-1], False)
+
+print("\ntalking_head shots: the shot marker is REQUIRED, not just described")
+c0 = PLAN.execute("shots","brief",3,16.5,0,"","defs","","","talking_head").result[0]
+c1 = PLAN.execute("shots","brief",3,16.5,1,"","defs","","prev body","talking_head").result[0]
+check("chunk 0 asked to BEGIN with [Shot 1]", "BEGIN the section with [Shot 1]" in c0, True)
+check("chunk 1 too", "BEGIN the section with [Shot 1]" in c1, True)
+check("never [Shot 2]", "Never write a [Shot 2]" in c1, True)
+# chunk 0 IS the opening; only later chunks are forbidden from opening
+check("chunk 0 may still establish", "ALREADY RUNNING" in c0, False)
+check("chunk 0 is told to establish", "FIRST chunk" in c0, True)
+check("chunk 1 may not open", "ALREADY RUNNING" in c1, True)
+for phrase in ("No fade in", "no cut", "no light coming up", "no camera settling"):
+    check("chunk 1 forbids %r" % phrase, phrase.lower() in c1.lower(), True)
+check("cinematic mode untouched", "ALREADY RUNNING" in
+      PLAN.execute("shots","brief",3,16.5,1,"a beat sheet","defs","","prev","cinematic").result[0], False)
+
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

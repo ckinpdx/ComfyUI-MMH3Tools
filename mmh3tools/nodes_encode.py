@@ -134,11 +134,20 @@ class MMH3StreamingEncode(io.ComfyNode):
         # VAE.encode() loads the model itself; going around it means doing that here
         pixels = vae.process_input(images)
         try:
-            # budget for ONE chunk, not the whole clip -- that is the point of this node
-            mem = int(vae.memory_used_encode(pixels[:min(n_frames, fpc)].shape, vae.vae_dtype))
+            # budget for ONE chunk, not the whole clip -- that is the point of this node.
+            # The shape must be the 5D [B, C, T, H, W] the ENCODER receives, not the
+            # IMAGE batch: core reads frames/height/width off shape[2:5], and
+            # process_input is elementwise (`image * 2.0 - 1.0`) so pixels is still the
+            # 4D [N, H, W, C] that came in. Passing that raised IndexError on shape[4]
+            # EVERY call, so the hint was never once delivered and every encode loaded
+            # with memory_required=0 -- no reservation at all, on the node whose whole
+            # job is bounded-memory encoding.
+            mem = int(vae.memory_used_encode(
+                (1, 3, min(n_frames, fpc), int(images.shape[1]), int(images.shape[2])),
+                vae.vae_dtype))
         except Exception as e:
-            logging.info("[MMH3StreamingEncode] memory_used_encode unavailable (%s); "
-                         "loading without a budget hint", type(e).__name__)
+            logging.warning("[MMH3StreamingEncode] memory_used_encode unavailable (%s); "
+                            "loading with NO vram reservation", type(e).__name__)
             mem = 0  # load_models_gpu adds this to a reserve and cannot take None
         comfy.model_management.load_models_gpu(
             [vae.patcher], memory_required=mem, force_full_load=vae.disable_offload)

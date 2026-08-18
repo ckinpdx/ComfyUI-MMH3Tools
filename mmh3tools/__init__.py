@@ -3,8 +3,11 @@ from . import patch_ref_labels as _patch_ref_labels
 from .nodes_loop import MMH3SeedOverlap, MMH3ConcatAV, MMH3FindDivergence, MMH3JoinAV, MMH3PackAV
 from .nodes_align import MMH3ForcedAlign
 from .nodes_lyricwindows import MMH3LyricsToWindows
+from .nodes_motion import MMH3MotionOverload
+from .nodes_schedule import MMH3ChunkSchedule
 from .nodes_music_analysis import MMH3MusicAnalysis
 from .nodes_musicscene import MMH3MusicScenePlanPrompt
+from .nodes_stylepack import MMH3LoadSkill
 from .nodes_encode import MMH3StreamingEncode
 from .nodes_lint import MMH3PromptLint
 from .nodes_music import (MMH3LyricsSectionize, MMH3MusicCaptionSplit,
@@ -69,6 +72,7 @@ NODES = [
     MMH3LoopingSampler,
     MMH3ContextWindows,
     # MMH3Tools/calculators
+    MMH3ChunkSchedule,
     MMH3WindowPlan,
     MMH3KeyframePlanner,
     MMH3UpscaleLadder,
@@ -80,6 +84,7 @@ NODES = [
     MMH3TaskSystemPrompt,
     MMH3ScenePlanPrompt,
     MMH3MusicScenePlanPrompt,
+    MMH3LoadSkill,
     MMH3WindowContext,
     MMH3PromptAccumulate,
     MMH3PromptPart,
@@ -116,6 +121,7 @@ NODES = [
     MMH3MusicAnalysis,
     # MMH3Tools/utils
     MMH3LatentInfo,
+    MMH3MotionOverload,
     MMH3FindDivergence,
     MMH3ReframePads,
     MMH3OutpaintLatent,

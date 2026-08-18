@@ -2,21 +2,23 @@
 
 Two different things, and the difference decides which branch a node lives on.
 
-## Upstream PRs — `main` may depend on these
+## Upstream PRs — all merged, nothing to apply
 
-Somebody else's pending change, which will merge. Applying one is ordinary: fetch a
-diff, apply it, and one day `git pull` makes it unnecessary. Nodes that need one live on
-`main` and **refuse to run without it** rather than appearing to work.
+The pack carried two of these for a while. Both are in core now, so this section is
+history: it records what they do, because the nodes still depend on the behaviour and
+anyone on an older ComfyUI needs to know why a node refuses.
 
-| PR | needed by | why |
+| PR | merged | what it gives the pack |
 |---|---|---|
-| **[#15375](https://github.com/Comfy-Org/ComfyUI/pull/15375)** drozbay | `MMH3SeedOverlap`, latent outpaint | Per-row masking, three parts: the mask reaches the model as a cond, preserved rows run at the cond timestep, and `MiniMaxH3` gets a `scale_latent_inpaint` override. Without it a hard mask has **no effect at all** — preserved rows still run at the generation timestep, so the model gets clean content labelled as noisy — and an *intermediate* mask value artifacts, since stock falls back to `BaseModel`'s noise blend. |
-| **[#15316](https://github.com/Comfy-Org/ComfyUI/pull/15316)** Haoming02 | nothing, but worth having | Reserves ~2 GB + 400 MB per RGB megapixel before the text encoder handles images. This is the minute-long hang when conditioning carries image references. |
-| ~~#15439~~ **MERGED 2026-08-13** | — | `MiniMaxH3AddGuide` is in core now. Requires a ComfyUI newer than `v0.33.0`; nothing to apply. See "What #15439 merging changed" below. |
+| **[#15375](https://github.com/Comfy-Org/ComfyUI/pull/15375)** drozbay | 2026-08-18 | Per-token masking, three parts: the mask reaches the model as a cond, preserved rows run at the cond timestep, and `MiniMaxH3` gets a `scale_latent_inpaint` override. Without it a hard mask has **no effect at all** — preserved rows still run at the generation timestep, so the model gets clean content labelled as noisy — and an *intermediate* mask value artifacts, since stock falls back to `BaseModel`'s noise blend. |
+| **[#15439](https://github.com/Comfy-Org/ComfyUI/pull/15439)** drozbay | 2026-08-13 | `MiniMaxH3AddGuide`: guides at any frame index, audio anchored at the same `cond_t`. |
+
+Minimum ComfyUI is therefore **`v0.33.0-20-gff6c8a8a`**. The fetch-and-apply recipe
+below is kept only for reviving an old build; on a current one it applies nothing.
 
 ```bash
 cd C:/ComfyUI
-for pr in 15375 15316; do
+for pr in 15375; do   # only on a ComfyUI predating the merge
   curl -sL "https://github.com/Comfy-Org/ComfyUI/pull/$pr.diff" -o /tmp/pr$pr.diff
   git apply --check /tmp/pr$pr.diff && git apply /tmp/pr$pr.diff
 done
@@ -28,9 +30,9 @@ an older base is exactly how #15371 went wrong.
 ### What #15439 merging changed (2026-08-13)
 
 **The hand-merge is gone.** #15439's `_forward` hunk used to conflict with #15375,
-needing two `seg_t`/`seg_tag` `cond_audio` entries added by hand. #15375 has since
-been **rebased onto the merged #15439**, and both it and #15316 now apply clean with
-no manual step at all.
+needing two `seg_t`/`seg_tag` `cond_audio` entries added by hand. #15375 was rebased
+onto the merged #15439 and applied clean, then merged itself on 2026-08-18 — so there
+is nothing left to apply on a current core.
 
 **`patch_guide_origin.py` is obsolete on current core.** The merged #15439 anchors a
 guide on the target origin by itself — measured on the live class, guide `11.000`

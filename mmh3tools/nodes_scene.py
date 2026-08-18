@@ -239,6 +239,115 @@ is not. Never write a banal scene - write banal speech over an escalating one.
 %s"""
 
 
+_CONTINUITY = """=== CONTINUITY: CONTINUE FROM THE PREVIOUS CHUNK ===
+
+Below is the PREVIOUS chunk's detailed_description. Your [Shot 1] opens on its
+FINAL frame -- the same positions, poses, point of contact, injuries, props,
+wardrobe state and camera it ended on -- and ADVANCES from there. Do not
+re-describe it, and do not re-open the scene with fresh establishing atmosphere;
+only beat 1 introduces the film, every later beat is a continuation of this.
+
+=== PREVIOUS CHUNK ===
+
+%s"""
+
+
+_SHOTS_TH = """You are writing ONE chunk of a single, ABSOLUTELY LOCKED, CONTINUOUS
+talking-head shot: detailed_description. Return ONLY that section's text -- no section
+label, no other sections, no preamble, no code fences, no markdown.
+
+This is chunk %d of %d of ONE unbroken take of a person speaking straight to camera.
+There is no scene, no arc, no escalation, and NO EDIT. The only things that change chunk
+to chunk are what is said and the ordinary life of a person talking. %s
+
+## THE CAMERA DOES NOT MOVE
+
+- A fixed tripod. Same framing for the entire film: same shot size, same angle, same
+  lens, the subject in the same place in frame, same background, same lighting, from
+  first frame to last. NO cut, NO push-in or pull-out, NO pan or tilt, NO reframe, NO
+  handheld drift. If an instruction implies the camera moving, it is wrong.
+- BEGIN the section with [Shot 1], carrying NO timestamp. There is exactly ONE shot
+  in this chunk and in the whole film. Never write a [Shot 2]: a second shot is an
+  edit, and there are no edits.
+- Nobody enters, nothing is introduced or knocked over, nothing happens in the room. A
+  talking head is still on purpose; the words carry it. There is no story to advance.
+
+## THE PERSON IS ALIVE, NOT A STATUE
+
+- Natural micro-life only, and only what a camera records: blinks, breath, small head
+  tilts, a brow raised, a glance away and back, hand gestures a person makes while
+  speaking. Keep every one consistent with the subject's definition.
+- No interior states, no "conveys" or "represents". If it cannot be filmed, cut it.
+
+## DIALOGUE IS THE ENTIRE CONTENT
+
+- Write the lines this chunk speaks and CONTINUE the monologue -- pick up mid-thought
+  from where the previous chunk ended (shown below) and never repeat a line or a point
+  already made.
+- The subject speaks ABOUT the topic. Dramatise a real train of thought aloud; do not
+  announce or read out a summary of it.
+- Identity and delivery go OUTSIDE <d>; only the language tag and spoken words go
+  inside:  The woman (S1) says: <d>[English] ...</d>
+- NEVER put spoken lines in double quotes -- quotes mean text shown ON SCREEN.
+- Natural speech: contractions, mid-sentence turns, the rhythm of thinking aloud. Fill
+  roughly %.0f-%.0f words of spoken content for this chunk's length -- a talking head
+  that goes quiet is dead air."""
+
+
+_BRIEF_TH = """=== WHAT THE SUBJECT IS TALKING ABOUT ===
+
+The monologue is about the following. The subject speaks their own thoughts about it, as
+a real person thinking aloud -- not reading it out and not announcing a summary of it,
+but their speech IS about this.
+
+%s"""
+
+
+_CONTINUITY_TH = """=== CONTINUITY: THIS IS THE SAME UNBROKEN SHOT ===
+
+Below is the PREVIOUS chunk's detailed_description. This chunk is the SAME continuous
+locked take: identical framing, subject position, lighting and background, and the
+subject carries on from the exact pose and mid-gesture the previous chunk ended on. Do
+NOT cut, do not re-establish, do not re-block, do not move the camera. Continue the
+monologue from where it stopped and do not repeat what was already said.
+
+=== PREVIOUS CHUNK ===
+
+%s"""
+
+
+def _prev_body(text):
+    """The `detailed_description` out of whatever `prev_detailed` was handed.
+
+    The continuity block promises the model "below is the PREVIOUS chunk's
+    detailed_description", but the thing the pack tells you to wire there --
+    MMH3PromptAccumulate's `prior_context` -- emits a whole SIX-SECTION prompt,
+    because it returns the last piece split on the `|` separator. Pasting that under
+    a label saying it is one section shows the writer a complete prompt and asks it
+    for a section: observed 2026-08-17, the model matched the format it was shown and
+    returned a full prompt, which MMH3ReplaceSection then spliced INTO
+    detailed_description, nesting a prompt inside its own body. Chunk 0 was clean
+    because it has no prior context to imitate.
+
+    Pulling the one section also stops the payload growing: re-sending every earlier
+    prompt in full is the bloat `prior_context` exists to avoid.
+
+    A bare body (no headers) is passed through -- that is already the right thing.
+    """
+    text = (text or "").strip()
+    if not text:
+        return "", None
+    from .nodes_lint import _SECTIONS_A, _SECTIONS_B, _section
+    following = list(dict.fromkeys(_SECTIONS_B + _SECTIONS_A))
+    body = _section(text, "detailed_description", following)
+    if not (body or "").strip():
+        return text, None
+    return body.strip(), ("prev_detailed held a full prompt (%d chars); used its "
+                          "detailed_description (%d chars) as the continuity example, "
+                          "since showing the writer a whole prompt is what makes it "
+                          "return one" % (len(text), len(body.strip())))
+
+
 class MMH3ScenePlanPrompt(io.ComfyNode):
     """System prompt for one stage of section-by-section prompt building."""
 
@@ -298,6 +407,23 @@ class MMH3ScenePlanPrompt(io.ComfyNode):
                     "extra_rules", multiline=True, default="", optional=True,
                     tooltip="Appended verbatim as a final block.",
                 ),
+                io.String.Input(
+                    "prev_detailed", multiline=True, default="", optional=True,
+                    tooltip="'shots' stage: the PREVIOUS chunk's detailed_description, "
+                            "wired from MMH3 Prompt Accumulate's prior_context (mode "
+                            "'last'). Appended as a continuation block so the writer "
+                            "opens this chunk on that chunk's final frame and advances, "
+                            "rather than opening a fresh scene. Empty on beat 0.",
+                ),
+                io.Combo.Input(
+                    "mode", options=["cinematic", "talking_head"], default="cinematic",
+                    optional=True,
+                    tooltip="'cinematic' (default): an escalating scene, each beat worse "
+                            "than the last. 'talking_head': ONE absolutely-locked "
+                            "continuous shot of a person speaking -- the shots stage "
+                            "holds the frame and continues the monologue instead of "
+                            "escalating, and does not require a beat_sheet.",
+                ),
             ],
             outputs=[
                 io.String.Output(display_name="system_prompt"),
@@ -307,7 +433,8 @@ class MMH3ScenePlanPrompt(io.ComfyNode):
 
     @classmethod
     def execute(cls, stage, brief, chunk_count, seconds_per_chunk, beat_index=0,
-                beat_sheet="", definitions="", extra_rules="") -> io.NodeOutput:
+                beat_sheet="", definitions="", extra_rules="", prev_detailed="",
+                mode="cinematic") -> io.NodeOutput:
         n = max(1, int(chunk_count))
         secs = float(seconds_per_chunk)
         notes = []
@@ -325,25 +452,46 @@ class MMH3ScenePlanPrompt(io.ComfyNode):
             if int(beat_index) != i:
                 notes.append("beat_index %d is outside 0..%d; clamped to %d."
                              % (int(beat_index), n - 1, i))
-            sheet = (beat_sheet or "").strip()
-            if not sheet:
-                raise ValueError(
-                    "MMH3ScenePlanPrompt: the 'shots' stage needs `beat_sheet`. Without "
-                    "it the writer cannot see where this chunk sits, and every chunk "
-                    "writes its own complete arc -- the exact failure this node exists "
-                    "to remove.")
-            last = i == n - 1
-            resolve = ("This is the LAST beat. It is the only one allowed to land, so "
-                       "give it the ending." if last else
-                       "Beats after this one still have to happen. End it worse than "
-                       "you found it, not settled.")
-            # a dialogue-heavy beat needs room; the format guide says fitting the
-            # spoken timeline beats hitting a word count
-            lo, hi = (250, 400) if secs <= 10 else (350, 500)
-            parts.append(_SHOTS % (i + 1, n, resolve, i, i + 2, secs, lo, hi, sheet))
+            if mode == "talking_head":
+                establish = ("This is the FIRST chunk: establish the subject speaking to "
+                             "camera and begin the monologue."
+                             if i == 0 else
+                             "This continues the unbroken take -- do NOT re-establish or "
+                             "re-introduce anything; pick up mid-thought from the "
+                             "previous chunk shown below. The take is ALREADY RUNNING: "
+                             "this chunk does not open on anything. No fade in, no cut "
+                             "from black, no light coming up, no camera settling, no "
+                             "reveal. Its first frame continues the previous frame.")
+                # ~2-3.5 spoken words/sec; a locked talking head is carried by speech
+                lo, hi = int(secs * 2), int(secs * 3.5)
+                parts.append(_SHOTS_TH % (i + 1, n, establish, lo, hi))
+            else:
+                sheet = (beat_sheet or "").strip()
+                if not sheet:
+                    raise ValueError(
+                        "MMH3ScenePlanPrompt: the 'shots' stage needs `beat_sheet`. "
+                        "Without it the writer cannot see where this chunk sits, and "
+                        "every chunk writes its own complete arc -- the exact failure "
+                        "this node exists to remove. (talking_head mode does not need "
+                        "one.)")
+                last = i == n - 1
+                resolve = ("This is the LAST beat. It is the only one allowed to land, "
+                           "so give it the ending." if last else
+                           "Beats after this one still have to happen. End it worse than "
+                           "you found it, not settled.")
+                # a dialogue-heavy beat needs room; the format guide says fitting the
+                # spoken timeline beats hitting a word count
+                lo, hi = (250, 400) if secs <= 10 else (350, 500)
+                parts.append(_SHOTS % (i + 1, n, resolve, i, i + 2, secs, lo, hi, sheet))
 
         if (brief or "").strip():
-            parts.append(_BRIEF % brief.strip())
+            if mode == "talking_head" and stage == "shots":
+                parts.append(_BRIEF_TH % brief.strip())
+            else:
+                parts.append(_BRIEF % brief.strip())
+        elif stage == "shots" and mode == "talking_head":
+            notes.append("talking_head shots with no brief -- the subject has no topic "
+                         "to talk about; wire the premise into `brief`.")
         elif stage != "shots":
             notes.append("no brief given; the writer has only the labels to work from.")
 
@@ -356,6 +504,19 @@ class MMH3ScenePlanPrompt(io.ComfyNode):
 
         if (extra_rules or "").strip():
             parts.append(extra_rules.strip())
+
+        if stage == "shots":
+            prev, prev_note = _prev_body(prev_detailed)
+            if prev_note:
+                notes.append(prev_note)
+            if prev:
+                parts.append((_CONTINUITY_TH if mode == "talking_head"
+                              else _CONTINUITY) % prev)
+            elif i > 0:
+                notes.append("no `prev_detailed` wired for beat %d, so it opens cold "
+                             "instead of continuing the previous chunk's final frame -- "
+                             "wire MMH3 Prompt Accumulate's prior_context (mode 'last')."
+                             % i)
 
         system = "\n\n".join(parts)
         report = ("stage: %s | %d chunk%s of %.1fs%s\n%s"

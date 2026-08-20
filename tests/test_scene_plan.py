@@ -230,5 +230,16 @@ for phrase in ("No fade in", "no cut", "no light coming up", "no camera settling
 check("cinematic mode untouched", "ALREADY RUNNING" in
       PLAN.execute("shots","brief",3,16.5,1,"a beat sheet","defs","","prev","cinematic").result[0], False)
 
+print("\nwardrobe belongs in subject_definitions, not in a shot")
+defs = PLAN.execute("definitions","brief",3,16.5,0,"","","","","talking_head").result[0]
+check("definitions DEMANDS the wardrobe", "STATE WHAT EVERY PERSON IS WEARING" in defs, True)
+check("and gives the reason", "byte-identically in every chunk" in defs, True)
+th = PLAN.execute("shots","brief",3,16.5,1,"","defs","","prev","talking_head").result[0]
+check("talking_head shots lock appearance", "APPEARANCE COMES FROM THE DEFINITION" in th, True)
+check("but action may still touch it", "sleeve pushed back" in th, True)
+# cinematic is left alone: a costume change there can be a real beat
+cin = PLAN.execute("shots","brief",3,16.5,1,"sheet","defs","","prev","cinematic").result[0]
+check("cinematic shots untouched", "APPEARANCE COMES FROM THE DEFINITION" in cin, False)
+
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

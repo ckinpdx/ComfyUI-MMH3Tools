@@ -99,8 +99,14 @@ Labels are 1-based per type and numbered independently.
 - DEFINE EVERY LABEL YOU WILL USE, AND USE EVERY LABEL YOU DEFINE. A label defined
   and never referenced is dead weight; a label referenced and never defined is a
   dangling tag the model cannot resolve.
-- Describe what is VISIBLE and permanent about each: build, hair, clothing, markings.
-  Not mood, not backstory, not what they want.
+- Describe what is VISIBLE and permanent about each: build, hair, markings. Not mood,
+  not backstory, not what they want.
+- STATE WHAT EVERY PERSON IS WEARING, head to foot, in their <Subject N> line --
+  garment, cut, colour, fabric, and anything worn on top of it. This is not optional
+  and not a detail to leave to the shot. subject_definitions is the ONLY section
+  repeated byte-identically in every chunk; wardrobe established anywhere else is
+  invisible to every chunk but the one that wrote it, and the subject changes clothes
+  partway through the film.
 - These must cover every chunk of the film, not just its opening. Anything that
   appears later still gets defined here.
 
@@ -271,6 +277,10 @@ to chunk are what is said and the ordinary life of a person talking. %s
   edit, and there are no edits.
 - Nobody enters, nothing is introduced or knocked over, nothing happens in the room. A
   talking head is still on purpose; the words carry it. There is no story to advance.
+- APPEARANCE COMES FROM THE DEFINITION. Do not introduce, change or re-describe
+  anything permanent -- wardrobe, hair, build, markings. You may let the action touch
+  it (a sleeve pushed back, hair moved off the face), but a detail stated here and
+  nowhere else exists for this chunk only, and the next chunk will contradict it.
 
 ## THE PERSON IS ALIVE, NOT A STATUE
 

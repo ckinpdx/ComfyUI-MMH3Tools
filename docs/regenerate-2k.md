@@ -18,6 +18,13 @@ card and the `/v2/video_regeneration` API for every design decision the nodes ma
 Where the pack goes beyond what MiniMax documents — past the 362-frame ceiling — it is
 said so plainly rather than implied.
 
+**One caveat on the target itself:** MiniMax's Reddit AMA describes a Regenerate-2K that
+*sounds* different from their model card — the card says the hosted 2K is the base model;
+the AMA describes a dedicated, lighter checkpoint they are still building. §1 (*Model card
+vs the AMA*) offers a reading that reconciles them — card = what runs today, AMA = what
+they will release — but flags it **as conjecture**, not fact. Either way the harness is
+unchanged; only what it is an approximation *of* moves.
+
 ---
 
 ## 1. What this is copying
@@ -57,6 +64,81 @@ And the overview:
 **references on the conditioning** rather than as anything resembling an upscaler. H3
 has no cross-attention; in-context means the 768p rows are packed into the sequence and
 attended directly. That is what `minimax_refs` is.
+
+### Model card vs the AMA — two descriptions, and a reading of them
+
+The model-card sentence above — *"we use the H3 base model to regenerate its own
+low-resolution result"* — is the load-bearing claim under this whole document: it is why
+the 2K pass is built on **H3-Base** at all. In a later Reddit AMA (r/StableDiffusion,
+researchers dacongya, Luigi, Nero, **Kiro**), Kiro described Regenerate-2K in terms that
+sound different: it is *"a dedicated latent-space DiT regeneration checkpoint … not
+simply the current H3 checkpoint running a second time,"* not a pixel upscaler, and one
+whose *"efficiency and quality"* they are still *"tuning so it can run locally."*
+
+**Two things must be flagged before reading anything into that.** First, one word in it
+carries no weight: *"latent-space DiT checkpoint"* describes **H3-Base too** — H3 *is* a
+latent-space diffusion transformer — so it does not distinguish the two. The only
+load-bearing phrases are *"dedicated,"* *"regeneration,"* and *"not simply the base run
+twice."* Second, the AMA is not verbatim here: Reddit is not crawlable for us, so the
+wording is a translated paraphrase corroborated via
+[InfoQ](https://www.infoq.cn/article/9C3eK9tJqDXbabbBy3aj) and
+[MiniMax's recap](https://x.com/MiniMax_AI/status/2086253065657790895), not a direct
+quote.
+
+The two statements are recorded above as **fact** (each is sourced). What follows is
+**conjecture — a reading that reconciles them, not something measured.** It is set down
+only because this pack's design rests on the model-card sentence, and a reader deserves
+to know how far that sentence can be trusted.
+
+**The reading.** They stop disagreeing if they describe **different artifacts at
+different times**:
+
+- The **model card describes what MiniMax runs today**: the hosted 2K endpoint *is*
+  H3-Base regenerating its own 768p in-context. Literally true as written — and it is the
+  method this pack reproduces.
+- The **AMA describes what they are building to release**: a *dedicated, lighter*
+  regeneration checkpoint — plausibly distilled (the base is already CFG-distilled) and
+  sparse-attention-native (the MoBA sparse attention they will ship separately) — so the
+  community can do 2K without datacenter hardware.
+
+Under that reading, *"not simply the base run a second time"* is Kiro contrasting the
+**future deliverable** with the naive base-rerun anyone can already do — not a
+description of the current endpoint. And *"efficiency and quality"* reads as *keep
+base-at-2K's quality, shed its cost*: the detail recovery the model card praises already
+exists in the current base method, so the unreleased work is making it **cheap**, not
+making it better.
+
+**Why lighter and not a heavier secret model (still conjecture, but evidence-backed).**
+A single unchunked base-at-2K pass already produces a correct 2K result here (§6,
+validated locally to 8s). A same-scale model does the job — so the unreleased thing is
+unlikely to be a bigger checkpoint hiding capability; a *leaner* one built for local cost
+fits the facts better. That the release is still pending, with MiniMax repeatedly saying
+they are *working on it* rather than *withholding* it, points the same way: if
+base-at-2K were the deliverable there would be nothing to build. This is inference from
+one working run plus their stated intent — not proof.
+
+**What would confirm or refute the reading:** if the released checkpoint is **smaller
+than base** or visibly distilled, this holds; if it is same-size and merely
+sparse-patched, the truth is closer to "slim the existing method down." Either way the
+delta is efficiency, not raw capability.
+
+**What is *not* conjecture, and what the pack depends on:** both descriptions agree it is
+**in-context regeneration, not super-resolution** — the 768p plus the original context
+are fed back in and the pass is *conditioned*, not upscaled. Everything in §§3–5
+(dimensions, per-window references, pinned audio) follows from that and stands regardless
+of which reading is right. And the harness is **checkpoint-agnostic**: whatever MiniMax
+releases drops into the same graph in place of H3-Base — and if it is the lighter model
+above, the pack gets *faster*, not merely better.
+
+One narrower point, also **not** conjecture: the tensor-shape argument in *"What the
+official pass will accept"* below (three modality rows in `adaln_proj`, so no hidden
+`base_video` role) bounds **H3-Base only**. A separately released checkpoint could be
+shaped differently, so that argument constrains today's open base weights, not whatever
+ships.
+
+None of this resolves §6. The chunking divergence (chunk 0 correct, chunk 1 diverges) is
+a property of the pack's chunking, which the documented single-pass method never
+performs — independent of which reading of the weights is right.
 
 ### It re-runs a generation; it does not upscale a video
 

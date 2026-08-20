@@ -106,6 +106,34 @@ are local llama-swap ids — swap them for yours. Two of them matter:
 the next, and OFF for beats and shots, which share a model that should stay resident
 across every iteration of the loop.
 
+[`workflows/MMH3_Looping_Cinematic.json`](workflows/) — the looping T2V film
+pipeline, and the successor to the old `MMH3_Looping_T2V`. Definitions, beat sheet
+and shots are written **section by section** (three **MMH3 Scene Plan Prompt**
+stages), then the loop re-details each chunk against the **previous chunk's rendered
+output** — the second **MMH3 Prompt Accumulate** carries that continuity forward — so
+each clip continues the last instead of restarting. **MMH3 Prompt Lint** guards chunk
+length against the window.
+
+[`workflows/MMH3_Looping_Monologue.json`](workflows/) — the same looping backbone in
+talking-head mode: one continuous monologue, absolutely-locked camera, no story arc.
+A stress test of whether the looping sampler joins chunks seamlessly when there is no
+cut to hide the seam. **MMH3 Chunk Schedule** paces the spoken-word budget per window.
+
+[`workflows/MMH3_Looping_I2V_PromptBuilding.json`](workflows/) — image-to-video that
+builds its own prompts (**MMH3 Load Skill** + an LLM) ahead of a three-window looping
+sampler, finishing on a chunked pixel-upscale ladder.
+
+[`workflows/MMH3_LoopingSampler_MusicVideo.json`](workflows/) — the music-video
+variant: windows are locked to musical beats and lyrics mapped per window, feeding the
+looping sampler; full-res and size-capped saves.
+
+[`workflows/MMH3_LoopingSampler_Regenerate2K.json`](workflows/) — the Regenerate-2K
+path: a looping 2K pass over an existing render, driven by the dedicated **MMH3
+Regenerate 2K Dims** / **Reference** nodes.
+
+These looping workflows need [ComfyUI-LlamaOmni](https://github.com/ckinpdx/ComfyUI-LlamaOmni)
+for the prompt nodes and RES4LYF for `ClownSampler_Beta`.
+
 ## Nodes
 
 In the Add Node menu these are filed under `MMH3Tools/…`, following the same layout

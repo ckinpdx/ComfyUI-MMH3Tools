@@ -142,6 +142,12 @@ the entry, and migrate any local workflow in the same commit.
   spans one pixel frame and phases 1–4 span four, so a raw per-token statistic is
   measuring the grid as much as the signal. Any future per-token score on H3 needs it.
 
+- **`workflows/` — five looping example workflows added, old `MMH3_Looping_T2V`
+  removed.** `MMH3_Looping_Cinematic` (successor to `MMH3_Looping_T2V`, wiring the new
+  `prev_detailed` continuity feed), `MMH3_Looping_Monologue` (`talking_head` mode),
+  `MMH3_Looping_I2V_PromptBuilding`, `MMH3_LoopingSampler_MusicVideo`, and
+  `MMH3_LoopingSampler_Regenerate2K`. README's Example workflows section documents each.
+
 ### Changed
 - **#15375 merged upstream 2026-08-18, so the pack now needs NO core patches.**
   Minimum ComfyUI is `v0.33.0-20-gff6c8a8a`. The Requirements section said "two
@@ -163,6 +169,25 @@ the entry, and migrate any local workflow in the same commit.
   run against one made earlier.
 
 ### Changed — prompts
+- **The wardrobe is now REQUIRED in `subject_definitions`.** The rule listed clothing
+  as one example of visible permanent detail -- "build, hair, clothing, markings" --
+  and the writer skipped it, producing a subject defined by hair, eyes and skin
+  markings with nothing worn. Same failure shape as the `[Shot 1]` marker: mentioned,
+  never demanded.
+
+  It has to live there because `subject_definitions` is the only section repeated
+  byte-identically in every chunk. An outfit established in chunk 0's
+  `detailed_description` is invisible to chunks 1..N by construction -- that section is
+  the one thing that varies -- so the subject changes clothes partway through the film.
+
+- **`talking_head` shots may no longer introduce persistent appearance.** Wardrobe,
+  hair, build and markings come from the definition and are not re-described or
+  changed. Action may still touch them -- a sleeve pushed back, hair moved off the
+  face -- since that is the shot doing its job rather than redefining the subject.
+
+  Cinematic mode is deliberately untouched: there a costume change can be a real beat,
+  and the same rule would fight the story it exists to tell.
+
 - **`talking_head` shots now REQUIRE the `[Shot 1]` marker.** The rule described the
   marker -- "[Shot 1] carries NO timestamp… do not write a [Shot 2]" -- without ever
   asking for one, so the writer took the actionable half and emitted no shot marker at
@@ -189,6 +214,23 @@ the entry, and migrate any local workflow in the same commit.
   they are not established as the cure.
 
 ### Fixed — documentation
+- **`docs/regenerate-2k.md` — recorded the model-card vs AMA question on Regenerate-2K,
+  with a reconciling reading flagged as conjecture.** The model card says the 2K pass
+  *"uses the H3 base model to regenerate its own low-resolution result"* (no separate
+  weights); the r/StableDiffusion AMA (Kiro) describes *"a dedicated … regeneration
+  checkpoint … not simply the current H3 checkpoint running a second time"* they are
+  *"tuning … so it can run locally."* New §1 subsection *Model card vs the AMA* records
+  both as sourced fact, notes that *"latent-space DiT checkpoint"* does not by itself
+  distinguish it from base and that the AMA wording is a translated paraphrase (Reddit
+  uncrawlable), then gives — **explicitly as conjecture** — the reading that the two
+  describe different artifacts in time: card = the base-at-2K method they run today (what
+  this pack reproduces), AMA = a *lighter* dedicated/distilled, sparse-native checkpoint
+  they are building for local use. Stated flat only: the sources, and that a single
+  base-at-2K pass produces a correct result here (validated to 8s). The harness is
+  checkpoint-agnostic (gets *faster* if the lighter model lands); the three-modality-row
+  tensor argument bounds H3-Base only; §6's divergence is unaffected. Intro carries a
+  one-line pointer.
+
 - **The feather's recorded MECHANISM was wrong; the decision was not.** 0.72.2 and
   0.73.0 explained the noisy seam as `rows_t = 1 - m*sigma` and the content blend
   `x*m + orig*(1-m)` corresponding "only approximately". Re-read against core

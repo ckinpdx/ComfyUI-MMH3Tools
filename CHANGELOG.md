@@ -47,6 +47,38 @@ the entry, and migrate any local workflow in the same commit.
   §10 is deliberately longer than §9: the chain has one full run behind it, and the
   guide says so at the top rather than implying more.
 
+- **README: the example-workflow dependency list is now derived, not asserted.** It
+  named only LlamaOmni and RES4LYF; the real set is eight packs, read off the
+  `cnr_id` / `aux_id` each workflow records per node. KJNodes and VideoHelperSuite
+  were needed by seven workflows and mentioned nowhere.
+
+  It also flags that **`SolAttnMiniMax` is not a published pack** — seven of the
+  eight workflows carry it and it resolves to a loose
+  `custom_nodes/sol_attn_minimax_v2.py`, so those graphs show a missing node on any
+  machine but the one they were saved on. `ModelAttentionBackend` next to it is
+  comfy-core and fine.
+
+- **README: removed a stale `Requires ComfyUI v0.30.0+` line** four lines above the
+  Requirements section, which says `v0.33.0-20-gff6c8a8a` or newer. The loose number
+  was the one that would land someone on a core where `carry="mask"` fails silently.
+
+- **Upscale-pass sampler settings corrected in three workflows.** Every pass whose
+  latent comes from `MMH3ChunkedPixelUpscale` now runs `sampling_start_step 0`,
+  `sampling_end_step 1000`, `phase2_start_step 0`, empty `keyframe_indices`.
+
+  Two passes in `MMH3_Looping_I2V_PromptBuilding` held `sampling_end_step 0`, which
+  is a zero-length window: the guard against that is nested under `if start > 0`, so
+  at `start = 0` it never fires and the sampler returns its input latent unsampled
+  with no error. Those passes were doing nothing. Sampler behaviour is unchanged —
+  this is a settings fix only.
+
+### Removed
+- **`MMH3_I2V_2K` example workflow.** Long out of date against the current nodes.
+  Its one finding that was not documented elsewhere — that windowing is *faster* at
+  2K — is already carried in full by `docs/context-windows.md` ("Measured: windowing
+  is FASTER at high resolution"), math included, so nothing is lost. Recoverable from
+  history if it is ever wanted back.
+
 ### Changed
 - **`MMH3LoopingSampler`: the `prior_av_latent` input is withheld from the schema.**
   The prior-continuation path never behaved correctly in practice, so the socket no

@@ -3,8 +3,6 @@
 MiniMax H3 latent tooling for ComfyUI — latent-domain conditioning and correct AV
 splicing for **chained long-form generation**.
 
-Requires ComfyUI **v0.30.0+** (native H3 support).
-
 ## Requirements
 
 **Stock ComfyUI, `v0.33.0-20-gff6c8a8a` or newer.** No patches, no carried diffs.
@@ -70,20 +68,6 @@ Three facts about H3 shape everything here:
 
 ## Example workflows
 
-[`workflows/MMH3_I2V_2K.json`](workflows/) — three-stage I2V to 2K. Generate
-small, then two low-denoise windowed upscale passes.
-
-The audio is decided **in the first stage** and carried forward; the upscale passes
-only refine picture. Both upscale samplers run through **MiniMax H3 Context
-Windows**, which at 2K is *faster* than not windowing — five windows of 17 latents
-do 44% of the attention work of one pass over 57, and attention dominates at that
-sequence length.
-
-Also needs [ComfyUI-LlamaOmni](https://github.com/ckinpdx/ComfyUI-LlamaOmni) for the
-prompt-writing step (an omni model transcribes the song's lyrics so the character
-lip-syncs), KJNodes, RES4LYF, VideoHelperSuite and rgthree. The prompt nodes are
-easy to swap for your own — see the Note on the canvas.
-
 [`workflows/MMH3_Scene_Prompt_Builder.json`](workflows/) — the prompt half on its
 own: N chunk prompts written **section by section**, ending at a pipe-separated
 string ready for **MMH3 Reference (Multi-Prompt)**. No sampler, no VAE, no weights —
@@ -131,8 +115,29 @@ looping sampler; full-res and size-capped saves.
 path: a looping 2K pass over an existing render, driven by the dedicated **MMH3
 Regenerate 2K Dims** / **Reference** nodes.
 
-These looping workflows need [ComfyUI-LlamaOmni](https://github.com/ckinpdx/ComfyUI-LlamaOmni)
-for the prompt nodes and RES4LYF for `ClownSampler_Beta`.
+### What the example workflows need
+
+Beyond this pack and comfy-core:
+
+| | needed by |
+|---|---|
+| [RES4LYF](https://github.com/ClownsharkBatwing/RES4LYF) — `ClownSampler_Beta`, sigma nodes | all but Scene Prompt Builder |
+| [KJNodes](https://github.com/kijai/ComfyUI-KJNodes) — `VAELoaderKJ`, `LoadAndResizeImage`, `VRAM_Debug` | all but Scene Prompt Builder |
+| [VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) — `VHS_LoadVideo`, `VHS_LoadAudioUpload` | all but Scene Prompt Builder |
+| [ComfyUI-LlamaOmni](https://github.com/ckinpdx/ComfyUI-LlamaOmni) — the prompt-writing nodes | every workflow that builds its own prompts |
+| [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) — `easy forLoopStart` / `forLoopEnd` | the prompt-loop workflows |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) — Fast Groups Bypasser | MusicVideo, I2V Prompt Building |
+| [ComfyUI-MelBandRoFormer](https://github.com/kijai/ComfyUI-MelBandRoFormer) — vocal separation | MusicVideo only |
+| ComfyUI-WhisperAlignmentToText | MusicVideo only |
+
+⚠️ **`SolAttnMiniMax` is not a published pack.** Seven of the eight workflows carry
+it, and it resolves to a loose `custom_nodes/sol_attn_minimax_v2.py` rather than
+anything installable — so those graphs will show a missing node on any machine but
+the one they were saved on. Delete the node and wire `ModelAttentionBackend` straight
+through to the LoRA loader; it is an attention-backend override, not part of the
+pipeline's logic.
+
+The prompt nodes are easy to swap for your own — see the Note on each canvas.
 
 [`workflows/MMH3_Looping_Upscale.json`](workflows/) — a refine pass over an **existing
 render** rather than a generation. The clip is encoded, run through **MMH3 Chunked
@@ -148,8 +153,6 @@ clip is encoded with **MMH3 Streaming Encode**, extended in the latent by **MMH3
 Outpaint Latent**, and **MMH3 Reframe Pads** solves the pad geometry for a 9:16 target.
 **MMH3 Context Windows** carries one sampler pass across the whole clip instead of
 chunking it through the looping sampler.
-
-These two need only RES4LYF — there are no prompt-building nodes in either.
 
 ## Nodes
 

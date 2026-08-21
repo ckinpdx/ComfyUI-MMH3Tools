@@ -9,9 +9,57 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
-## [Unreleased] — 0.76.0
+## [Unreleased] — 0.77.0
 
 ### Added
+- **Two example workflows: `MMH3_Looping_Upscale` and `MMH3_Outpaint`.** Upscale is a
+  refine pass over an existing render — chunked pixel upscale to an `MMH3UpscaleLadder`
+  target, then `MMH3SplitAV` so the audio half can be re-packed under a zero `SolidMask`
+  and held while the looping sampler re-samples only the video. Outpaint reframes a
+  landscape clip to 9:16 via `MMH3OutpaintLatent` + `MMH3ReframePads`, sampled in one
+  `MMH3ContextWindows` pass rather than through the looping sampler. Neither uses the
+  prompt-building nodes, so RES4LYF is their only extra dependency.
+
+- **`docs/looping-sampler.md` — new `Recipes` section (§8).** Six entries, one per
+  shipped workflow, read off their saved widget values rather than recommended from
+  tuning — the section says so, since nothing here is a measured optimum. Sections
+  renumbered: Symptom -> lever 8->9, Observed 9->10, Not yet measured 10->11, with
+  the three internal cross-references updated. Also corrects a pre-existing slip in
+  the header, which pointed at "Section 9" for what is still unknown when that had
+  become Observed.
+
+  Writing it surfaced an undocumented tension, now logged under Not yet measured:
+  the music-video workflow ships `overlap_strength_audio` at 1.0, which is the value
+  Observed calls "tinny on chunk 2". That measurement was taken on T2VA with
+  GENERATED audio; the music-video graph pins a real track, where full pinning is
+  arguably the intent. The comparison has never been run.
+
+- **`docs/music-video.md` — "MiniMax H3 Music Video — Field Guide".** The music-video
+  chain had no doc beyond its README node entries, while the looping sampler,
+  context windows and Regenerate-2K each had one. Same skeleton as
+  `docs/looping-sampler.md`: mental model, the grid, alignment, music analysis, the
+  three stages, typography, recipes, symptom → lever, `Observed`, `Not yet measured`.
+
+  The **`Observed — 2026-08-15`** block moved out of README into §9 of the guide,
+  where it sits next to the chain it describes rather than inside the node reference;
+  README keeps a pointer. Nothing was reworded in the move.
+
+  §10 is deliberately longer than §9: the chain has one full run behind it, and the
+  guide says so at the top rather than implying more.
+
+### Changed
+- **`MMH3LoopingSampler`: the `prior_av_latent` input is withheld from the schema.**
+  The prior-continuation path never behaved correctly in practice, so the socket no
+  longer appears on the node. **The code is not removed** — `execute` still accepts
+  `prior_av_latent=None` and the prepend / `5j+2` re-grid / phase-offset / audio-drift
+  implementation is intact; the schema entry is commented out in place and restoring it
+  is uncommenting one block. It was the LAST input, so re-adding it appends and cannot
+  disturb widget order.
+
+  It is a socket rather than a widget, so no saved graph's `widgets_values` shift. A
+  workflow that wired it loses that one link and nothing else; none of the workflows in
+  this repo wired it.
+
 - **`MMH3ScenePlanPrompt` — new `mode` toggle (append-only): `cinematic` (default) /
   `talking_head`.** `talking_head` swaps the escalation prompts for an ABSOLUTELY-LOCKED
   continuous take: the `shots` stage holds one fixed-tripod frame, forbids cuts / camera

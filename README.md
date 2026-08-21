@@ -134,6 +134,23 @@ Regenerate 2K Dims** / **Reference** nodes.
 These looping workflows need [ComfyUI-LlamaOmni](https://github.com/ckinpdx/ComfyUI-LlamaOmni)
 for the prompt nodes and RES4LYF for `ClownSampler_Beta`.
 
+[`workflows/MMH3_Looping_Upscale.json`](workflows/) — a refine pass over an **existing
+render** rather than a generation. The clip is encoded, run through **MMH3 Chunked
+Pixel Upscale** (`rtx_vsr`) at the target **MMH3 Upscale Ladder** picks from an aspect
+preset, then **MMH3 Split AV** takes the pair apart so the audio half can be re-packed
+under a **zero** `SolidMask` — held, never sampled — while the looping sampler
+re-samples only the video at the higher resolution. Finishes on a streaming save plus
+a size-capped copy. Distinct from Regenerate-2K, which drives the dedicated
+Regenerate-2K nodes instead of the ladder.
+
+[`workflows/MMH3_Outpaint.json`](workflows/) — reframing, not generation: a landscape
+clip is encoded with **MMH3 Streaming Encode**, extended in the latent by **MMH3
+Outpaint Latent**, and **MMH3 Reframe Pads** solves the pad geometry for a 9:16 target.
+**MMH3 Context Windows** carries one sampler pass across the whole clip instead of
+chunking it through the looping sampler.
+
+These two need only RES4LYF — there are no prompt-building nodes in either.
+
 ## Nodes
 
 In the Add Node menu these are filed under `MMH3Tools/…`, following the same layout
@@ -485,6 +502,9 @@ lyrics against it, slice the alignment by render window, then write prompts.
   flag a vision model handed pictures and no instruction describes an invented
   character anyway.
 
+  The whole chain — grid, alignment, the three stages, typography, symptom table —
+  is written up in [`docs/music-video.md`](docs/music-video.md).
+
 - **MMH3 Load Skill** — loads one file from the pack's `styles/` folder and emits it
   for `extra_rules` on either scene-plan node. **Chain the nodes to stack skills**:
   wire one node's output into the next node's `previous`, so wiring order is stacking
@@ -509,38 +529,10 @@ lyrics against it, slice the alignment by render window, then write prompts.
 
 #### Observed — 2026-08-15
 
-From a first full music-video run. Recorded because the same wording would be
-re-derived otherwise, and because two of these contradict what a search turns up.
-
-- **Typography rendered flat, "like a single word subtitle".** Two causes, both in
-  the rules rather than the model. *Which* word: `text bursts` said "keep it SHORT",
-  and the shortest word in any lyric is a function word — the output was the word
-  **"much"**. It now requires a burst to mean something standing alone, bans function
-  words by name, and offers a test: printed alone on a poster, does it read as a
-  statement or as a fragment someone forgot to finish? *How* it looked: the rule
-  asked only where the text "sits", which is satisfied by centring it — and centred
-  at readable size **is** the subtitle look. Scale is now the first decision, and the
-  block says outright that mid-sized and centred is the one option that reads as
-  captioning.
-
-- **Thematic type beats a font description.** Letters made of circuit traces for a
-  machine song, vapour and sugar-floss for a candy one. The identity is chosen ONCE
-  in `beats` and inherited by every chunk — chosen per chunk, each invents its own
-  and the video has no design.
-
-- **Split frames and RGB channel split are wanted, not artifacts.** Two places, two
-  times or two framings named inside ONE shot is what makes H3 divide the frame. It
-  was happening as a side effect of shots describing several things at once; it is
-  now stated as a technique to reach for on purpose. The general rule underneath
-  both: **a treatment belongs if the song earns it** — the good emergent effects came
-  from briefs dense enough for the model to reach into their world.
-
-- **Slow motion is a choice here, not a drift.** Community reports describe H3
-  falling into slow motion unbidden, but those cluster around LoRA use (the
-  Realism-People LoRA "adds slow mo at times", lightning LoRAs "struggled with slow
-  motion"). ck has never seen it unasked on this setup, so the prompt treats it as
-  something you ask for. `"live-action video"` at the front of the style sentences is
-  kept as a documented remedy if a chunk ever comes back slower than intended.
+What a first full music-video run taught — the typography corrections, thematic type,
+split frames as a technique rather than an artifact, and why slow motion is treated as
+a choice here — now lives in
+[`docs/music-video.md`](docs/music-video.md) §9, alongside the chain it applies to.
 
 ### Sampling
 - **MiniMax H3 Looping Sampler** — fill a whole clip chunk by chunk in one node
@@ -564,6 +556,7 @@ re-derived otherwise, and because two of these contradict what a search turns up
   for dual-solver setups. All three carry LTXAVTools' semantics unchanged. See
   [`docs/looping-sampler.md`](docs/looping-sampler.md) — including what is still
   unmeasured.
+
 - **MiniMax H3 Keyframe Planner** — end-anchored keyframe indices for a chained run,
   ported from LTXAVTools' planner. Frame 0 opens, each chunk travels to a keyframe at
   the last frame **it renders**, the final one ends on `-1`. Start-anchoring instead

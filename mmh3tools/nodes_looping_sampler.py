@@ -64,8 +64,8 @@ from comfy_extras.nodes_custom_sampler import SamplerCustomAdvanced, SplitSigmas
 
 from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
                      LATENT_BASE, VAE_SPATIAL, VIDEO_T_DIM,
-                     frame_at_latent, frames_to_audio_t, latents_to_frames, pack_av,
-                     unpack_av)
+                     frame_at_latent, frames_to_audio_t, latents_to_frames,
+                     pack_av, unpack_av)
 from .nodes_multiprompt import MMH3CondSet
 from .nodes_windows import _audio_index_at, _plan, _window_frame_spans
 
@@ -455,18 +455,24 @@ class MMH3LoopingSampler(io.ComfyNode):
                 io.Vae.Input(
                     "vae", optional=True,
                     tooltip="The H3 VIDEO vae, needed only to encode `keyframes`."),
-                io.Latent.Input(
-                    "prior_av_latent", optional=True,
-                    tooltip="An already-rendered AV latent to continue from. It is copied "
-                            "to the output verbatim and never sampled; `latent` then "
-                            "describes only the NEW region, and the output is prior + new.\n\n"
-                            "The schedule is planned over the COMBINED length, and every "
-                            "window lying inside the prior is skipped. The first generated "
-                            "chunk therefore overlaps the prior's tail and carries it like "
-                            "any earlier chunk's tail, so the prior's length does not have "
-                            "to line up with anything.\n\n"
-                            "Prompts map to the GENERATED chunks: cond 0 is the first chunk "
-                            "actually sampled, not the first window of the combined clip."),
+                # HIDDEN 2026-08-21. The prior-continuation path never behaved
+                # correctly in practice, so the socket is withheld from the schema
+                # rather than deleted: `execute` still accepts `prior_av_latent=None`
+                # and the prepend/pad/phase implementation below is untouched.
+                # Restore by uncommenting -- it was the LAST input, so putting it
+                # back appends and cannot disturb widget order in saved graphs.
+                # io.Latent.Input(
+                # "prior_av_latent", optional=True,
+                # tooltip="An already-rendered AV latent to continue from. It is copied "
+                # "to the output verbatim and never sampled; `latent` then "
+                # "describes only the NEW region, and the output is prior + new.\n\n"
+                # "The schedule is planned over the COMBINED length, and every "
+                # "window lying inside the prior is skipped. The first generated "
+                # "chunk therefore overlaps the prior's tail and carries it like "
+                # "any earlier chunk's tail, so the prior's length does not have "
+                # "to line up with anything.\n\n"
+                # "Prompts map to the GENERATED chunks: cond 0 is the first chunk "
+                # "actually sampled, not the first window of the combined clip."),
             ],
             outputs=[
                 io.Latent.Output(display_name="latent"),

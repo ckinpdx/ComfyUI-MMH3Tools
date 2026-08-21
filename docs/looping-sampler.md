@@ -8,7 +8,7 @@ tested — grid alignment, index placement, guider handling, the join — and ev
 number below that describes *structure* is measured on the real `PackedLayout` or
 the real latent shapes. Numbers that would describe *quality* (which overlap looks
 best, which strength holds lipsync) are not here, because guessing them would be
-worse than leaving the gap. Section 9 lists exactly what is still unknown.
+worse than leaving the gap. Section 11 lists exactly what is still unknown.
 
 ---
 
@@ -121,7 +121,7 @@ What remains is a genuine choice about mechanism, not cost. A guide is exact —
 same rows re-injected at every step. A masked region is blended by the sampler, and
 since #15375 was rebased (2026-08-13) per-row masking carries a **float** per row
 rather than a bool, so a partial mask is genuinely partial. Which holds continuity
-better is **untested** (§9).
+better is **untested** (§10).
 
 ### No feather — removed in 0.73.0
 
@@ -400,14 +400,51 @@ master: 897 latents (3048 frames, 127.00s) -- the input length, exactly
 
 ---
 
-## 8. Symptom → lever
+## 8. Recipes
+
+**What the shipped workflows actually do**, read off their saved widget values rather
+than recommended from tuning — the numbers below are a starting point someone already
+ran, not a measured optimum. Order is
+`chunk_frames · overlap_frames · carry · video/audio overlap strength · phase2_start_step`.
+
+**Long-form cinematic** — `MMH3_Looping_Cinematic`
+192 · 68 · `mask` · 1.0 / 0.8 · phase 2 at step 2 · `use_input_audio` off, so H3
+writes the soundtrack. The widest overlap of any shipped graph.
+
+**Talking head / monologue** — `MMH3_Looping_Monologue`
+192 · 68 · `mask` · 1.0 / 0.95 · phase 2 at step 2. Same backbone, higher audio
+carry. There is no cut to hide the seam here, which is the point: it doubles as the
+cleanest test of whether chunks join at all.
+
+**Music video over a pinned track** — `MMH3_LoopingSampler_MusicVideo`
+192 · 22 · `mask` · 1.0 / **1.0** · phase 2 at step 2 · `use_input_audio` **on**.
+See §11 — the 1.0 audio strength is deliberate here and not the case §10 warns about,
+but the distinction is untested.
+
+**Image-to-video, prompts built in-graph** — `MMH3_Looping_I2V_PromptBuilding`
+derived · 22 · `mask` · 1.0 / 0.9 · phase 2 at step 2, then a second sampler at 136
+frames, finishing on a chunked pixel-upscale ladder.
+
+**Refine an existing render** — `MMH3_Looping_Upscale`
+136 · 22 · `mask` · 1.0 / 0.9 · phase 2 **0** (single solver). The audio half is
+re-packed under a zero `SolidMask` before sampling, so only the video is resampled
+and the original track survives the pass untouched.
+
+**Regenerate-2K** — `MMH3_LoopingSampler_Regenerate2K`
+derived · 22 · `mask` · pass 1 at 1.0 / 1.0, pass 2 at **0 / 0** · phase 2 at step 2.
+The second pass carries nothing across seams; why that is right for a 2K re-pass is
+not written down anywhere, including here.
+
+---
+
+## 9. Symptom → lever
 
 | Symptom | Look at |
 |---|---|
 | every chunk looks like chunk 0 | the conditioning, not the noise — the sampler adds the chunk index to the seed itself. Read the report's `prompt N` per chunk, then the cond_set: one cond, or N near-identical ones, look the same from here |
 | every chunk uses the same prompt | fewer prompts than chunks — the report says so |
 | seam visible / discontinuous motion | raise `overlap_frames`; try `carry="keyframe"` |
-| lipsync drifts across a seam | check master audio matches video in the report. **Not** `overlap_strength_audio` 1.0 — that is the measured-bad end (§9) |
+| lipsync drifts across a seam | check master audio matches video in the report. **Not** `overlap_strength_audio` 1.0 — that is the measured-bad end (§10) |
 | a keyframe lands in the wrong place | read the placement lines; indices are frames of the WHOLE clip |
 | chunk count is not what you expected | it is derived — check `MMH3WindowPlan` with the same three numbers |
 | every chunk has the same music | fixed: chunks slice the master's audio. If it persists, the latent is not the whole clip |
@@ -420,7 +457,7 @@ master: 897 latents (3048 frames, 127.00s) -- the input length, exactly
 
 ---
 
-## 9. Observed
+## 10. Observed
 
 - **`overlap_strength_audio`: 0.8–0.95 both sound good; 1.0 is tinny on chunk 2.**
   Measured 2026-08-10 on T2VA runs. 1.0 fully pins the carried audio, so if chunk 2
@@ -430,12 +467,18 @@ master: 897 latents (3048 frames, 127.00s) -- the input length, exactly
   lipsync wanted 1.0 — that was a guess, and these runs contradict it.
 - **The T2VA carry works.** Same run, `carry="mask"`, three-field format.
 
-## 10. Not yet measured
+## 11. Not yet measured
 
 Everything here is honest about being unknown.
 
+- **`overlap_strength_audio` 1.0 against a PINNED track.** §10's "1.0 is tinny on
+  chunk 2" was measured on T2VA, where the audio is generated and the carry is the
+  only continuity. With `use_input_audio` on, every chunk slices the same master, so
+  full pinning is arguably the intent rather than a risk — but nobody has run the
+  comparison. The music-video workflow ships at 1.0 on that reasoning alone.
+
 - **`overlap_strength_audio` below 0.8.** 0.8–0.95 are known good and 1.0 known bad
-  (§9); the bottom of the range is untried, and where it stops preserving the carry
+  (§10); the bottom of the range is untried, and where it stops preserving the carry
   at all is unknown.
 - **Which `overlap_frames` is enough.** The trade is context versus waste, and the
   waste is exact (§3) while the context is not.

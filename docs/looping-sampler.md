@@ -110,6 +110,9 @@ They are passed as a **guide anchored at frame 0** — re-injected every step, n
 denoised, carrying a multi-step clip *plus its audio* at the same `cond_t`. Needs
 **#15439**, and the guide-origin wrap if references ride along.
 
+**Never run.** The construction is unit-tested; no clip has been generated through
+it. See §11.
+
 ### No join, no trim, no loss
 
 An earlier version of this node allocated each chunk separately and concatenated
@@ -443,7 +446,7 @@ not written down anywhere, including here.
 |---|---|
 | every chunk looks like chunk 0 | the conditioning, not the noise — the sampler adds the chunk index to the seed itself. Read the report's `prompt N` per chunk, then the cond_set: one cond, or N near-identical ones, look the same from here |
 | every chunk uses the same prompt | fewer prompts than chunks — the report says so |
-| seam visible / discontinuous motion | raise `overlap_frames`; try `carry="keyframe"` |
+| seam visible / discontinuous motion | raise `overlap_frames` first. `carry="keyframe"` is the other lever, but it has never been run (§11) — trying it is an experiment, not a fix |
 | lipsync drifts across a seam | check master audio matches video in the report. **Not** `overlap_strength_audio` 1.0 — that is the measured-bad end (§10) |
 | a keyframe lands in the wrong place | read the placement lines; indices are frames of the WHOLE clip |
 | chunk count is not what you expected | it is derived — check `MMH3WindowPlan` with the same three numbers |
@@ -482,9 +485,11 @@ Everything here is honest about being unknown.
   at all is unknown.
 - **Which `overlap_frames` is enough.** The trade is context versus waste, and the
   waste is exact (§3) while the context is not.
-- **Whether `keyframe` actually beats `mask` in output quality.** It is cheaper at
-  the join, which is arithmetic. Whether a guide holds continuity as well as a
-  masked carry is an empirical question nobody has answered.
+- **`carry="keyframe"` has never generated a clip.** Not "unmeasured against mask" —
+  unrun. The guide construction is unit-tested against a fake sampler (anchored at
+  frame 0, multi-step clip plus audio, no mask) and the arithmetic of the join is
+  cheaper, but no output has been looked at. Everything else in this document was
+  measured on `mask`.
 - **`overlap_strength_video` / `_audio` below 1.0.** Per-row masking binarises at
   0.5 for TIMESTEP purposes, so partial strength only blends the latent
   continuously — see `core-changes.md`. What that looks like is untested.

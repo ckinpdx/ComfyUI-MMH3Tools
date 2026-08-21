@@ -3,6 +3,21 @@
 MiniMax H3 latent tooling for ComfyUI — latent-domain conditioning and correct AV
 splicing for **chained long-form generation**.
 
+## What has actually been run
+
+**`carry="mask"` is the tested path.** Every example workflow ships with it, and every
+observation in the docs was measured on it.
+
+**`carry="keyframe"` has never generated a clip.** The plumbing is unit-tested — the
+guide is built and anchored at frame 0, it carries a multi-step clip *plus its audio*
+rather than a still, no mask is set, and the node refuses up front on a core without
+#15439. But that is structure checked against a fake sampler, not output anyone has
+looked at.
+
+It stays because it is written, gated and harmless where it sits — not because it is
+recommended. If you switch `carry` to `keyframe`, you are the first, and the seam is
+the thing to watch.
+
 ## Requirements
 
 **Stock ComfyUI, `v0.33.0-20-gff6c8a8a` or newer.** No patches, no carried diffs.

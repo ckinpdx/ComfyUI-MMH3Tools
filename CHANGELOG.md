@@ -73,6 +73,22 @@ the entry, and migrate any local workflow in the same commit.
   with no error. Those passes were doing nothing. Sampler behaviour is unchanged —
   this is a settings fix only.
 
+- **README: a "What has actually been run" block, above Requirements.** `carry="mask"`
+  is the tested path and every observation in the docs was measured on it;
+  `carry="keyframe"` has **never generated a clip**. The guide construction is
+  unit-tested against a fake sampler — anchored at frame 0, multi-step clip plus
+  audio, no mask — but that is structure, not output.
+
+  It stays in the node because it is written and gated, not because it is
+  recommended. Saying so at the top costs nothing and stops the `carry` dropdown
+  reading as two equally exercised options.
+
+  `docs/looping-sampler.md` now agrees in three places: the `keyframe` route
+  description, the Not-yet-measured entry (rewritten from "whether keyframe beats
+  mask" to "never run" — a different claim), and the symptom table, which had been
+  offering `carry="keyframe"` as a remedy for visible seams without noting that
+  trying it is an experiment.
+
 ### Removed
 - **`MMH3_I2V_2K` example workflow.** Long out of date against the current nodes.
   Its one finding that was not documented elsewhere — that windowing is *faster* at

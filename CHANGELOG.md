@@ -52,11 +52,12 @@ the entry, and migrate any local workflow in the same commit.
   `cnr_id` / `aux_id` each workflow records per node. KJNodes and VideoHelperSuite
   were needed by seven workflows and mentioned nowhere.
 
-  It also flags that **`SolAttnMiniMax` is not a published pack** — seven of the
-  eight workflows carry it and it resolves to a loose
-  `custom_nodes/sol_attn_minimax_v2.py`, so those graphs show a missing node on any
-  machine but the one they were saved on. `ModelAttentionBackend` next to it is
-  comfy-core and fine.
+  It also names **`SolAttnMiniMax`** — Kijai's single-file Sol-Attn node (arXiv
+  2607.24027), reaching H3's attention through comfy-kitchen's CUDA kernels, so it
+  wants `comfy_kitchen` built with `sol_attn`. Seven of the eight workflows carry it.
+  It is a speed override rather than pipeline logic, so anyone without it can delete
+  the node and wire `ModelAttentionBackend` straight to the LoRA loader.
+  `ModelAttentionBackend` beside it is comfy-core.
 
 - **README: removed a stale `Requires ComfyUI v0.30.0+` line** four lines above the
   Requirements section, which says `v0.33.0-20-gff6c8a8a` or newer. The loose number

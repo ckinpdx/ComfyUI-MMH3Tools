@@ -130,12 +130,14 @@ Beyond this pack and comfy-core:
 | [ComfyUI-MelBandRoFormer](https://github.com/kijai/ComfyUI-MelBandRoFormer) — vocal separation | MusicVideo only |
 | ComfyUI-WhisperAlignmentToText | MusicVideo only |
 
-⚠️ **`SolAttnMiniMax` is not a published pack.** Seven of the eight workflows carry
-it, and it resolves to a loose `custom_nodes/sol_attn_minimax_v2.py` rather than
-anything installable — so those graphs will show a missing node on any machine but
-the one they were saved on. Delete the node and wire `ModelAttentionBackend` straight
-through to the LoRA loader; it is an attention-backend override, not part of the
-pipeline's logic.
+**`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
+([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention
+through comfy-kitchen's CUDA kernels — it wants `comfy_kitchen` built with `sol_attn`
+(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Seven
+of the eight workflows carry it because it is a speed override, not pipeline logic.
+
+**If you do not have it, delete the node** and wire `ModelAttentionBackend` straight
+through to the LoRA loader. Nothing else in the graph depends on it.
 
 The prompt nodes are easy to swap for your own — see the Note on each canvas.
 

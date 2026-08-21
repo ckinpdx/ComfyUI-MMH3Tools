@@ -89,6 +89,18 @@ the entry, and migrate any local workflow in the same commit.
   offering `carry="keyframe"` as a remedy for visible seams without noting that
   trying it is an experiment.
 
+- **Dead `prior_av_latent` / `speed_schedule` sockets stripped from the saved
+  workflows.** Hiding an input from the node schema does not remove it from a graph
+  someone already saved: the workflow file carries its own copy of each node's input
+  list, and the frontend rebuilds from that. So both sockets kept appearing on the
+  sampler after a restart even though the backend no longer served either.
+
+  Removing an input is not a plain delete — the links table addresses targets by
+  index (`link[4]`), so every link pointing past the removed slot has to be
+  renumbered or the graph silently rewires. Each file was validated before and after
+  (every input's link id must belong to a link whose target slot equals that input's
+  index) and written only if it passed.
+
 ### Removed
 - **`MMH3_I2V_2K` example workflow.** Long out of date against the current nodes.
   Its one finding that was not documented elsewhere — that windowing is *faster* at

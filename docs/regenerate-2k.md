@@ -463,7 +463,24 @@ Cost, for one 192-frame window at 1344x768:
 
 Audio is 0.56% of it. That is why there is no toggle to drop it — turning it off saves
 nothing and removes the only thing telling the model which sound belongs to which
-picture. `ref_downscale` is the real cost lever; it hits the video side quadratically.
+picture. `ref_downscale` is the only lever with real leverage on that number; it hits
+the video side quadratically.
+
+**Observed 2026-08-21: `ref_downscale 2x` was much worse. Leave it at `none`.**
+
+The arithmetic above is still correct — `ref_downscale` is where the cost is — it is
+simply not spendable. This route is *in-context regeneration*, not super-resolution
+(§1): the reference IS the source of detail the 2K pass reads back out. Downscale it
+and you remove the detail the pass exists to recover, so the model invents it
+instead. Paying ~4x less attention to a reference that no longer carries the picture
+is a bad trade at any price.
+
+**This closes the lever rather than just tuning it.** The options are `none`, `2x`
+and `4x`, so 2x is the gentlest setting available and it already fails; 4x is
+strictly more aggressive. There is nothing milder left to try.
+
+Treat the cost table as a reason to slice the reference per window — which costs
+nothing in fidelity — rather than as an invitation to shrink it.
 
 ## 5. The audio is already finished
 
@@ -572,5 +589,6 @@ continuity you want to keep.
   chunking divergence, and it only matters for clips that genuinely exceed 362 frames,
   since anything shorter should be run in a single pass anyway.
 - **Whether seeding the latent and attaching references together beats either alone.**
-- **Which `ref_downscale` is affordable.** 2x cuts reference cost ~4x; what it costs in
-  fidelity at 2K is unknown.
+- ~~**Which `ref_downscale` is affordable.**~~ Answered 2026-08-21: **none of them.**
+  2x came back much worse, and since the options are only `none`/`2x`/`4x`, the
+  gentlest setting is the one that failed. See §4.

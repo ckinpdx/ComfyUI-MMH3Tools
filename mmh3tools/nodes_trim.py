@@ -21,6 +21,7 @@ import logging
 
 import torch
 
+from comfy.nested_tensor import NestedTensor
 from comfy_api.latest import io
 
 from .common import (
@@ -196,7 +197,21 @@ class MMH3SplitAV(io.ComfyNode):
                 "Split an H3 AV latent into its plain video and audio latents. The "
                 "inverse of MMH3 Pack AV; the shapes round-trip."
             ),
-            inputs=[io.Latent.Input("latent", tooltip="H3 AV latent.")],
+            inputs=[
+                io.Latent.Input("latent", tooltip="H3 AV latent."),
+                # Appended 2026-08-22, after the node shipped: widget values serialize
+                # positionally, so this must stay last.
+                io.Boolean.Input(
+                    "preserve_masks", default=True,
+                    tooltip="Carry the AV latent's noise_mask onto the two outputs, "
+                            "each half getting its own. ON is what MMH3 Pack AV "
+                            "expects: it has a whole branch for re-pairing masks, and "
+                            "without this there was never anything left to re-pair, so "
+                            "a split and repack silently dropped the pin that "
+                            "`use_input_audio` installs to protect a supplied track. "
+                            "Turn OFF to deliberately discard the mask and denoise the "
+                            "halves freely."),
+            ],
             outputs=[
                 io.Latent.Output(display_name="video_latent"),
                 io.Latent.Output(display_name="audio_latent"),
@@ -207,7 +222,7 @@ class MMH3SplitAV(io.ComfyNode):
         )
 
     @classmethod
-    def execute(cls, latent) -> io.NodeOutput:
+    def execute(cls, latent, preserve_masks=True) -> io.NodeOutput:
         video, audio = unpack_av(latent, "latent", allow_video_only=True)
         vt = int(video.shape[VIDEO_T_DIM])
         at = int(audio.shape[AUDIO_T_DIM]) if audio is not None else 0
@@ -229,10 +244,35 @@ class MMH3SplitAV(io.ComfyNode):
                   % (vt, frames, frames / float(FPS),
                      int(audio.shape[AUDIO_T_DIM]),
                      int(audio.shape[AUDIO_T_DIM]) / 40.0, note))
+        vout = {"samples": video.contiguous()}
+        aout = {"samples": audio.contiguous()}
+
+        # Split the mask the same way the samples were split. A video-only latent
+        # carries a plain tensor rather than a pair, so unbind only when there is
+        # something to unbind, and take the LAST element as audio to match how
+        # MMH3PackAV reads it back.
+        if preserve_masks:
+            mask = latent.get("noise_mask")
+            vm = am = None
+            if isinstance(mask, NestedTensor):
+                parts = mask.unbind()
+                vm = parts[0]
+                am = parts[-1] if len(parts) > 1 else None
+            elif mask is not None:
+                vm = mask
+            if vm is not None:
+                vout["noise_mask"] = vm.contiguous()
+            if am is not None:
+                aout["noise_mask"] = am.contiguous()
+            if vm is not None or am is not None:
+                report += ("\n  carried noise_mask: video %s, audio %s"
+                           % ("yes" if vm is not None else "no",
+                              "yes" if am is not None else "no"))
+        elif latent.get("noise_mask") is not None:
+            report += "\n  ! preserve_masks is off; the input's noise_mask was dropped"
+
         logging.info("[MMH3SplitAV] " + report.splitlines()[0])
-        return io.NodeOutput({"samples": video.contiguous()},
-                             {"samples": audio.contiguous()},
-                             vt, int(audio.shape[AUDIO_T_DIM]), report)
+        return io.NodeOutput(vout, aout, vt, int(audio.shape[AUDIO_T_DIM]), report)
 
 
 class MMH3OutpaintLatent(io.ComfyNode):

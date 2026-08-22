@@ -66,10 +66,12 @@ from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
                      LATENT_BASE, VAE_SPATIAL, VIDEO_T_DIM,
                      frame_at_latent, frames_to_audio_t, latents_to_frames,
                      pack_av, unpack_av)
+from .nodes_loop import per_row_mask_is_continuous
 from .nodes_multiprompt import MMH3CondSet
 from .nodes_windows import _audio_index_at, _plan, _window_frame_spans
 
 _GUIDE_KEYS = ("minimax_keyframes", "minimax_frame_count")
+MASK_MODES = ["max", "min", "mean", "last"]
 
 
 def _strip_guide_keys(cond, label):
@@ -455,6 +457,41 @@ class MMH3LoopingSampler(io.ComfyNode):
                 io.Vae.Input(
                     "vae", optional=True,
                     tooltip="The H3 VIDEO vae, needed only to encode `keyframes`."),
+                io.Mask.Input(
+                    "denoise_mask", optional=True,
+                    tooltip="Denoise mask for the VIDEO half over the WHOLE clip: WHITE "
+                            "regenerates, BLACK keeps the input latent's content. The "
+                            "AUDIO half is NOT affected -- mask it with "
+                            "`audio_denoise_mask`.\n\n"
+                            "Reduced onto the latent grid with the VAE's real geometry "
+                            "and snapped to the DiT's 2x2 patch, so 32 pixels is the "
+                            "finest feature it can express.\n\n"
+                            "Merged keep-wins (elementwise min) with the mask the "
+                            "latent already carried and with the overlap carry, then "
+                            "sliced per chunk. Kept regions reproduce the input latent, "
+                            "so an empty latent pins BLACK -- this is a v2v tool."),
+                io.Combo.Input(
+                    "denoise_mask_mode", options=MASK_MODES, default="max",
+                    optional=True,
+                    tooltip="How BOTH masks are reduced onto the latent grid, "
+                            "spatially and across each latent's frame group. 'max' is "
+                            "the union and the safe default; 'min' is the intersection; "
+                            "'mean' gives fractional edges; 'last' takes each group's "
+                            "final frame. `audio_denoise_mask` is pooled to 1x1, so "
+                            "only the temporal grouping reaches it."),
+                io.Mask.Input(
+                    "audio_denoise_mask", optional=True,
+                    tooltip="Denoise mask for the AUDIO half: WHITE regenerates, BLACK "
+                            "keeps the input latent's audio. Only its TIME axis is "
+                            "read -- each frame reduces to one value, mapped onto the "
+                            "audio grid through the same boundary conversion the chunk "
+                            "loop uses, so a span frozen here lines up with the "
+                            "picture.\n\n"
+                            "INDEPENDENT of `denoise_mask`: freeing video does not free "
+                            "audio, or the reverse. Left unconnected, audio is masked "
+                            "only by whatever the input latent already carried -- see "
+                            "`preserve_masks` on MiniMax H3 Split AV, which is what "
+                            "lets a `use_input_audio` pin survive a split and repack."),
                 # HIDDEN 2026-08-21. The prior-continuation path never behaved
                 # correctly in practice, so the socket is withheld from the schema
                 # rather than deleted: `execute` still accepts `prior_av_latent=None`
@@ -487,7 +524,8 @@ class MMH3LoopingSampler(io.ComfyNode):
                 sampling_start_step=0, sampling_end_step=1000,
                 phase2_start_step=0, phase2_sampler=None, phase2_guider=None,
                 keyframes=None, keyframe_indices="", vae=None,
-                prior_av_latent=None) -> io.NodeOutput:
+                prior_av_latent=None, denoise_mask=None, denoise_mask_mode="max",
+                audio_denoise_mask=None) -> io.NodeOutput:
         conds = (cond_set or {}).get("conds") or []
         if not conds:
             raise ValueError("MMH3LoopingSampler: cond_set holds no conditioning.")
@@ -700,6 +738,57 @@ class MMH3LoopingSampler(io.ComfyNode):
         out_a = None if master_a is None else master_a.clone()
         in_mask_v, in_mask_a = _split_mask(latent)
 
+        if in_mask_v is not None or in_mask_a is not None:
+            lines.append("  input latent carried a noise_mask (video %s, audio %s)"
+                         % ("yes" if in_mask_v is not None else "no",
+                            "yes" if in_mask_a is not None else "no"))
+
+        if denoise_mask is not None or audio_denoise_mask is not None:
+            if not per_row_mask_is_continuous():
+                raise RuntimeError(
+                    "MMH3LoopingSampler: the mask inputs need per-row masking (#15375). "
+                    "On this core a mask is accepted and IGNORED -- you would get a full "
+                    "regeneration with nothing raised. Update ComfyUI, or unwire the "
+                    "mask.")
+
+        # The two halves are INDEPENDENT. `denoise_mask` reduces onto the video grid and
+        # stops there; audio is masked only by `audio_denoise_mask`, or by whatever the
+        # latent already carried.
+        #
+        # Deriving one from the other reads as a safety feature -- the two can then never
+        # disagree about a frozen span -- and is wrong, because a mask only carries
+        # temporal intent when it IS temporal. A subject matted out of every frame is
+        # white somewhere at every timestep, so the spatial reduction returned "free"
+        # everywhere and regenerated a track that `use_input_audio` had pinned.
+        if denoise_mask is not None:
+            mv = _mask_to_video_latent(
+                denoise_mask.to(master_v.device), total_t,
+                int(master_v.shape[3]), int(master_v.shape[4]), denoise_mask_mode)
+            kept = float((mv < 0.5).float().mean()) * 100.0
+            lines.append("  denoise_mask: %.1f%% of the video grid kept (pinned to the "
+                         "input latent); the audio half is untouched" % kept)
+            if float(master_v.abs().max()) < 1e-6:
+                lines.append("  ! the input video latent is all zeros, so kept regions "
+                             "pin BLACK -- encode the source into `latent`")
+            in_mask_v = mv if in_mask_v is None else torch.minimum(
+                in_mask_v.to(mv.dtype), mv)
+
+        if audio_denoise_mask is not None:
+            if master_a is None:
+                lines.append("  ! audio_denoise_mask is wired but this latent has no "
+                             "audio half -- ignored")
+            else:
+                am = _mask_to_video_latent(
+                    audio_denoise_mask.to(master_v.device), total_t, 1, 1,
+                    denoise_mask_mode)
+                prof = _video_mask_to_audio(am, total_t, total_a, denoise_mask_mode)
+                free = float((prof > 0.5).float().mean()) * 100.0
+                lines.append("  audio_denoise_mask: %.1f%% of the track free to "
+                             "regenerate" % free)
+                ma = _audio_profile_to_mask(prof, master_a)
+                in_mask_a = ma if in_mask_a is None else torch.minimum(
+                    in_mask_a.to(ma.dtype), ma)
+
         for i, w in enumerate(windows):
             idx = w.index_list
             v0, v1 = idx[0] + offset, min(idx[-1] + 1 + offset, total_t)
@@ -828,6 +917,110 @@ def _ones_like_mask(v, a):
     am = None if a is None else torch.ones(
         [a.shape[0], 1, a.shape[2], a.shape[3]], dtype=torch.float32, device=a.device)
     return vm, am
+
+
+# The DiT reads the mask per 2x2 LATENT patch, so 2 latent cells -- 32 pixels at the
+# VAE's /16 -- is the finest feature a mask can express. Snapping each patch to one
+# value keeps an edge from landing mid-patch, where the token would otherwise carry a
+# partial pooled strength and get its own timestep (rows_t = 1 - m*sigma).
+MASK_TOKEN_PATCH = 2
+
+_MASK_REDUCE = {
+    "max": lambda g, d: g.amax(dim=d),
+    "min": lambda g, d: g.amin(dim=d),
+    "mean": lambda g, d: g.mean(dim=d),
+    "last": lambda g, d: g.select(d, g.shape[d] - 1),
+}
+
+
+def _token_snap(x, method):
+    """One value per 2x2 latent patch, replicate-padded on odd edges."""
+    t, h, w = x.shape
+    p = MASK_TOKEN_PATCH
+    x = torch.nn.functional.pad(x[:, None], (0, -w % p, 0, -h % p), mode="replicate")
+    if method == "min":
+        x = -torch.nn.functional.max_pool2d(-x, p)
+    elif method == "mean":
+        x = torch.nn.functional.avg_pool2d(x, p)
+    else:
+        x = torch.nn.functional.max_pool2d(x, p)
+    x = x.repeat_interleave(p, dim=-2).repeat_interleave(p, dim=-1)
+    return x[:, 0, :h, :w]
+
+
+def _mask_to_video_latent(mask, total_t, lat_h, lat_w, mode):
+    """MASK batch -> [1,1,total_t,lat_h,lat_w] on the latent grid.
+
+    Spatially pooled rather than interpolated: bilinear averages, which manufactures
+    a fractional value along every edge, and on H3 each such cell then denoises at
+    its own timestep. Temporally grouped on the VAE's real cycle -- latent k covers
+    frames [frame_at_latent(k), frame_at_latent(k+1)) -- so an edge lands where the
+    encoder actually put it. A uniform split misplaces it: the first latent of every
+    17-frame group covers ONE frame and the other four cover four each.
+    """
+    m = mask
+    if m.ndim == 4:
+        m = m[..., 0] if m.shape[-1] == 1 else m.mean(dim=-1)
+    if m.ndim == 2:
+        m = m[None]
+    m = m.to(torch.float32)
+
+    reduce = _MASK_REDUCE.get(mode, _MASK_REDUCE["max"])
+    x = m[:, None]
+    if mode == "min":
+        x = -torch.nn.functional.adaptive_max_pool2d(-x, (lat_h, lat_w))
+    elif mode == "mean":
+        x = torch.nn.functional.adaptive_avg_pool2d(x, (lat_h, lat_w))
+    else:
+        x = torch.nn.functional.adaptive_max_pool2d(x, (lat_h, lat_w))
+    x = _token_snap(x[:, 0], mode)
+
+    n = int(x.shape[0])
+    if n == 1:
+        out = x.expand(total_t, -1, -1)
+    elif n == total_t:
+        out = x
+    else:
+        px = frame_at_latent(total_t)
+        if n != px:
+            idx = torch.linspace(0, n - 1, px).round().long().clamp(0, n - 1)
+            x = x[idx]
+        rows = []
+        for k in range(total_t):
+            a, b = frame_at_latent(k), frame_at_latent(k + 1)
+            a, b = min(a, x.shape[0] - 1), min(max(b, a + 1), x.shape[0])
+            rows.append(reduce(x[a:b], 0))
+        out = torch.stack(rows)
+    return out[None, None].contiguous()
+
+
+def _video_mask_to_audio(mv, total_t, total_a, mode):
+    """Put a mask already on the video latent grid onto the audio grid.
+
+    Video latent k owns audio [_audio_index_at(k), _audio_index_at(k+1)); each span
+    takes the spatial reduction of that latent's mask. Boundaries are converted
+    independently because audio_t is not additive.
+
+    Called ONLY on `audio_denoise_mask`, which arrives pooled to 1x1, so the spatial
+    reduction is a no-op and this is purely the time mapping. Deliberately NOT applied
+    to `denoise_mask`: a spatial mask carries no temporal intent, and reducing a
+    subject matte this way returns "free" at every timestep.
+    """
+    reduce = _MASK_REDUCE.get(mode, _MASK_REDUCE["max"])
+    per_t = reduce(reduce(mv[0, 0].reshape(total_t, -1), 1)[:, None], 1)
+    prof = torch.ones(total_a, dtype=torch.float32, device=mv.device)
+    for k in range(total_t):
+        a = _audio_index_at(k, total_t, total_a)
+        b = _audio_index_at(k + 1, total_t, total_a) if k + 1 < total_t else total_a
+        if b > a:
+            prof[a:b] = per_t[k]
+    return prof
+
+
+def _audio_profile_to_mask(prof, sub_a_like):
+    """[T40] profile -> [B,1,2,T40] on the audio latent's own axes (temporal = dim 3)."""
+    return prof.view(1, 1, 1, -1).expand(
+        sub_a_like.shape[0], 1, sub_a_like.shape[2], -1).contiguous()
 
 
 def _sliced_mask(sub_v, sub_a, in_v, in_a, v0, v1, a0, a1):

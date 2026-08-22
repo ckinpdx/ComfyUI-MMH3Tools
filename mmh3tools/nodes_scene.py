@@ -598,6 +598,17 @@ class MMH3PromptPart(io.ComfyNode):
                 "did not use %r as a separator. Check the beats stage's output." % sep)
 
         i, notes = int(index), []
+        if len(pieces) == 1:
+            # One piece means the separator never appeared. With clamp on, every
+            # index then returns the WHOLE text and each chunk is spliced with the
+            # entire sheet instead of its own beat -- silently, and it looks like a
+            # model failure downstream rather than a split failure here.
+            logging.warning(
+                "[MMH3PromptPart] the text did not split: no %r found, so all %d "
+                "chars are being returned as a single piece. If this is a beat sheet "
+                "or a lyric block, the writer dropped the separator.", sep, len(body))
+            notes.append("NO SPLIT: %r never appeared -- this is the whole text, not "
+                         "one piece of it" % sep)
         if i >= len(pieces):
             if not clamp:
                 raise ValueError(

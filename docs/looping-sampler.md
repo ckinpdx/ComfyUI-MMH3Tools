@@ -431,7 +431,10 @@ frames, finishing on a chunked pixel-upscale ladder.
 **Refine an existing render** — `MMH3_Looping_Upscale`
 136 · 22 · `mask` · 1.0 / 0.9 · phase 2 **0** (single solver). The audio half is
 re-packed under a zero `SolidMask` before sampling, so only the video is resampled
-and the original track survives the pass untouched.
+and the original track survives the pass untouched. Since 2026-08-22 there are two
+cheaper ways to say the same thing: leave `Split AV`'s `preserve_masks` on and the
+pin travels through the split by itself, or wire a black mask into the sampler's
+`audio_denoise_mask`.
 
 **Regenerate-2K** — `MMH3_LoopingSampler_Regenerate2K`
 derived · 22 · `mask` · pass 1 at 1.0 / 1.0, pass 2 at **0 / 0** · phase 2 at step 2.

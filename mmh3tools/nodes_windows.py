@@ -83,9 +83,21 @@ from .common import (
 def _audio_index_at(n, total_v, total_a):
     """Audio-latent index at video-latent boundary `n`.
 
-    The VAE is 2 latents for the first 5 frames, then 5 latents per 17. Inverting
-    that gives frames(n) = 5 + 17*(n-2)/5, which is EXACT at every on-grid boundary
-    and interpolates in between. Then audio_t = frames/24*40.
+    Uses `frame_at_latent`, which walks the VAE's real FRAME_PER_TOKEN cycle
+    (1,4,4,4,4) and is therefore EXACT at every index, not only on the 5j+2 grid.
+    Then audio_t = frames/24*40.
+
+    It previously inverted the grid as frames(n) = 5 + 17*(n-2)/5 -- a LINEAR
+    interpolation of a NON-UNIFORM mapping, since the first latent of each 17-frame
+    cycle covers ONE frame and the other four cover four each. That agreed only on
+    the grid and drifted up to 1.8 frames between grid points, which is 3 audio
+    latents, 75 ms.
+
+    Callers happened to be safe: window and overlap latents are both snapped to
+    5j+2, so the stride is a multiple of 5 and `v0 + carried` always landed back on
+    the grid. The audio carry boundary was correct by arithmetic coincidence rather
+    than by construction, and any off-grid caller -- a context_schedule that does not
+    snap, a hand-set overlap -- would have shifted it 75 ms with nothing raised.
 
     Boundaries are converted independently and subtracted rather than converting a
     window LENGTH, because audio_t = round(frames/24*40) is not additive -- the same
@@ -97,8 +109,7 @@ def _audio_index_at(n, total_v, total_a):
         return 0
     if n >= total_v:
         return total_a
-    frames = FRAME_BASE + FRAMES_PER_GROUP * (n - LATENT_BASE) / float(LATENTS_PER_GROUP)
-    idx = int(round(max(0.0, frames) / FPS * AUDIO_LATENT_FPS))
+    idx = int(round(frame_at_latent(n) / FPS * AUDIO_LATENT_FPS))
     return max(0, min(total_a, idx))
 
 

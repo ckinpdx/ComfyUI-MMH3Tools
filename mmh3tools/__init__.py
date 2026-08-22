@@ -15,6 +15,7 @@ from .nodes_music import (MMH3LyricsSectionize, MMH3MusicCaptionSplit,
 from .nodes_looping_sampler import MMH3KeyframePlanner, MMH3LoopingSampler
 from .nodes_save import MMH3SizeCappedCopy, MMH3StreamingSave
 from .nodes_upscale import MMH3ChunkedPixelUpscale
+from .nodes_tokens import MMH3OfficialTokens
 from .nodes_trim import (
     MMH3OutpaintLatent,
     MMH3SplitAV,
@@ -119,6 +120,7 @@ NODES = [
     MMH3ForcedAlign,
     MMH3LyricsToWindows,
     MMH3MusicAnalysis,
+    MMH3OfficialTokens,
     # MMH3Tools/utils
     MMH3LatentInfo,
     MMH3MotionOverload,

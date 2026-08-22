@@ -29,6 +29,8 @@ from comfy_api.latest import io
 
 STAGES = ["definitions", "beats", "shots"]
 TYPOGRAPHY = ["off", "exact lyrics", "text bursts"]
+MUSIC_SOURCE = ["supplied", "generated"]
+TREATMENTS = ["music video", "restrained"]
 
 _BRIEF = """=== THE VIDEO'S IDEA ===
 
@@ -90,7 +92,10 @@ Visible markers: fully_preserved, partially_preserved, attribute_transfer,
 weak_reference. Audio markers: fully_copy, partially_copy, reference, weak_reference.
 Those are values to CHOOSE BETWEEN, never to list.
 
-## overall_soundscape
+@@AUDIO_RULES@@"""
+
+
+_AUDIO_SUPPLIED = """## overall_soundscape
 
 THE SONG IS THE AUDIO. Do not invent room tone, weather or footsteps competing with
 it. Describe the acoustic world only where the picture implies one, and say plainly
@@ -102,15 +107,115 @@ Describe THIS song: instrumentation, tempo, texture, how the vocal sits. You are
 describing something that already exists and will be supplied as audio, so do not
 compose an alternative."""
 
+
+_AUDIO_GENERATED = """## overall_soundscape
+
+THERE IS NO TRACK YET. The model writes the audio in the same pass as the picture,
+out of these words. Never say the audio "is provided", "is supplied", or "carries
+the sound" -- there is nothing there to carry it.
+
+This section is AMBIENCE AND ACTION SOUND ONLY: room tone, rain, a door, a footstep
+the picture shows. Never the vocal and never the backing -- those belong to
+non_diegetic_music and to the sung lines. If the picture implies no diegetic sound,
+write N/A.
+
+## non_diegetic_music - the SPEC the model performs
+
+You are not describing a song that exists. You are specifying the one to generate,
+and this section is what the model reads to make it.
+
+- Name genre and tempo: an approximate BPM, or a plain descriptor.
+- Name instruments SPECIFICALLY and always with a playing style -- "brushed snare",
+  "fingerpicked steel-string", "plucky analog synth bass" -- never "drums, bass".
+- Restate the same tempo, key and core rhythm section in EVERY chunk, in the same
+  terms. That repetition is what stops the song drifting between chunks. It is not
+  padding to trim.
+- Then say what this chunk does differently from the one before, and end with ONE
+  clause describing the shape WITHIN it: "lifting into the second half", "swelling
+  and receding", "building to a peak before falling away".
+- Do NOT ask for a structural change inside a chunk. The model holds a groove and
+  executes dynamics; a section changes because a new chunk begins, not because you
+  asked."""
+
+
+_SUNG_GENERATED = """
+=== THE WORDS ARE SUNG, AND ONLY YOU CAN ASK FOR THEM ===
+
+The model generates the vocal. If the words are not written into
+detailed_description they are NOT SUNG, and the result is an instrumental with a
+mouth moving to nothing.
+
+- Write the line as <d>[English] the words</d>, VERBATIM from the lyrics you were
+  given for this chunk. Do not paraphrase, reorder or improve them.
+- Attribute it: the subject SINGS, never says. Use the same (Sx) id as speech --
+  Subject 1 (S1) sings: <d>[English] ...</d>
+- Hang the action off the line, OPENING the passage with it rather than appending it
+  after a run of description.
+- Describe the singing physically: sustained open vowels, a held note, breath taken
+  before a phrase, jaw and throat. Sung mouth shapes are not spoken ones and the
+  model needs telling which it is.
+- Put the words ONLY here. Never repeat them in overall_soundscape or
+  non_diegetic_music.
+- TIME THE CUTS TO THE VOICE: cut on a breath, a phrase end, or a rest. Never cut
+  mid-word -- the mouth is mid-vowel on both sides of the join."""
+
+
+_TREAT_MUSIC_VIDEO = """- **SPLIT FRAMES ARE A TOOL HERE, so reach for them on purpose.** Two places, two
+  times or two framings named inside ONE shot makes H3 divide the frame -- split
+  screen, inset, banded overlay. That is a music-video technique, not an artifact.
+  Say which halves hold what, and whether they move together or against each other.
+- The performer can be present, absent, or multiplied. A music video is not obliged
+  to be literal about who is singing, and several of her in one frame -- tiled,
+  mirrored, out of step -- is a legitimate image rather than a mistake.
+- Vary it. A whole video of split frames is as flat as none; the technique lands
+  where a single-image shot came before it."""
+
+
+_TREAT_RESTRAINED = """- **ONE IMAGE PER SHOT. Do not divide the frame.** No split screen, no inset, no
+  banded overlay, no tiled or mirrored copies of the performer. Naming two places or
+  two framings inside one shot is what makes H3 split the frame, so name ONE.
+- The performer stays whole and present. If she is singing, the frame holds her
+  close enough to read her face and mouth. That is the subject, not a surface to
+  decorate.
+- Carry the interest in camera, light and staging instead: a move that means
+  something, a practical that pulses with the track, a change of distance."""
+
+
+_TREAT_MENU_MV = """Known to render well: **split frames**, **RGB channel split**, **slow motion**.
+Those are starting points, not the whole vocabulary -- name the treatment
+explicitly, say how strong it is, and say WHEN it hits. An effect that runs
+continuously stops reading as an effect."""
+
+
+_TREAT_MENU_RESTRAINED = """Keep it optical and physical: bloom, halation, smeared highlights, shallow focus,
+slow motion. Name the treatment explicitly, say how strong it is, and say WHEN it
+hits. An effect that runs continuously stops reading as an effect. No frame
+division, no channel splitting, no datamosh."""
+
+
 _BEATS = """You are writing the SUMMARY of every chunk of a MUSIC VIDEO, all at once,
 as a beat sheet. One summary per chunk, %d of them, separated by a single |
 character.
 
 Output ONLY the summaries and the separators. No numbering, no labels, no headings.
 
-Each is one paragraph opening with a bracketed task-type prefix, e.g.
+**THE `|` IS MANDATORY AND IS THE ONLY SEPARATOR.** Put a single `|` between every
+pair of summaries -- %d summaries means exactly %d pipe characters. The bracketed
+prefix is NOT a separator: `...narrowing back.[reference generation] Before the...`
+run together with no pipe is ONE summary as far as everything downstream is
+concerned, and the whole sheet then gets spliced into every chunk instead of one
+beat each. Do not end the last summary with a pipe.
+
+Each is one paragraph opening with a bracketed TASK-TYPE prefix, e.g.
 [reference generation], reusing only the labels you were given. Introduce no new
 labels.
+
+**The prefix is a TASK TYPE. It is NEVER a section name.** `[subject_definitions]`,
+`[summary]`, `[retention_analysis]`, `[detailed_description]`, `[overall_soundscape]`
+and `[non_diegetic_music]` are the sections of the prompt being assembled -- they are
+not tasks and must never appear in a bracket here. A summary prefixed with a section
+name gets copied wholesale into that section further down the chain, and the chunk
+loses its shot.
 
 ## THE ARC IS THE SONG'S, NOT YOURS
 
@@ -206,6 +311,13 @@ detailed_description.
 Return ONLY that section's text. No section label, no other sections, no preamble,
 no code fences, no markdown.
 
+**WRITE THE SHOT. DO NOT RESTATE THE SUMMARY.** You are given this chunk's summary as
+your instruction, not as your answer. Never copy it back, never open with a bracketed
+label taken from it, and never describe the chunk in the third person -- "for the line
+X, she walks past Y" is a plan, not a shot. Your output MUST contain `[Shot 1]`. If it
+does not, the chunk renders from a paragraph about a video instead of a description of
+one.
+
 You are writing **chunk %d of %d**, which covers **%s** and runs %.1f seconds.
 
 ## Structure
@@ -231,15 +343,7 @@ are sung, and they are given in THIS CHUNK's time, starting at 00:00.000.
 
 - Give the camera and the light INTENT. Motion, texture, a practical that pulses
   with the track.
-- **SPLIT FRAMES ARE A TOOL HERE, so reach for them on purpose.** Two places, two
-  times or two framings named inside ONE shot makes H3 divide the frame -- split
-  screen, inset, banded overlay. That is a music-video technique, not an artifact.
-  Say which halves hold what, and whether they move together or against each other.
-- The performer can be present, absent, or multiplied. A music video is not obliged
-  to be literal about who is singing, and several of her in one frame -- tiled,
-  mirrored, out of step -- is a legitimate image rather than a mistake.
-- Vary it. A whole video of split frames is as flat as none; the technique lands
-  where a single-image shot came before it.
+@@TREATMENTS@@
 
 ## FRAME TREATMENTS COME FROM THE VIDEO'S WORLD
 
@@ -248,10 +352,7 @@ song earns RGB channel split, scanlines, datamosh, dropped frames, interlace tea
 A soft one earns bloom, halation, print-through, smeared highlights. Take the
 treatment from what the video is ABOUT rather than from a menu of filters.
 
-Known to render well: **split frames**, **RGB channel split**, **slow motion**.
-Those are starting points, not the whole vocabulary -- name the treatment
-explicitly, say how strong it is, and say WHEN it hits. An effect that runs
-continuously stops reading as an effect.
+@@TREATMENT_MENU@@
 
 ## MOTIVATE THE CUT
 
@@ -466,6 +567,29 @@ class MMH3MusicScenePlanPrompt(io.ComfyNode):
                             "the video model, that several images are one person from "
                             "different angles, and that the image beats the brief on "
                             "appearance. Needs a vision-capable model on that call."),
+                io.Combo.Input(
+                    "music_source", options=MUSIC_SOURCE, default="supplied",
+                    optional=True,
+                    tooltip="'supplied' (default): the track already exists and is "
+                            "handed to the sampler, so non_diegetic_music DESCRIBES "
+                            "it and overall_soundscape says the track carries the "
+                            "sound.\n\n"
+                            "'generated': H3 writes the audio in the same pass. "
+                            "non_diegetic_music becomes the SPEC the model performs, "
+                            "overall_soundscape stops claiming a track was provided, "
+                            "and the sung words must be quoted as "
+                            "<d>[English] ...</d> in detailed_description. Without "
+                            "that the model sings nothing and the mouth moves to "
+                            "silence."),
+                io.Combo.Input(
+                    "treatments", options=TREATMENTS, default="music video",
+                    optional=True,
+                    tooltip="'music video' (default): split frames, RGB channel "
+                            "split, the full vocabulary.\n\n"
+                            "'restrained': one image per shot, no frame division, no "
+                            "multiplied performer. For a piece whose subject is the "
+                            "performance itself -- a split frame halves the singer "
+                            "exactly when the mouth is the point."),
             ],
             outputs=[
                 io.String.Output(display_name="system_prompt"),
@@ -477,9 +601,11 @@ class MMH3MusicScenePlanPrompt(io.ComfyNode):
     def execute(cls, stage, brief, chunk_count, seconds_per_chunk, typography,
                 beat_index=0, beat_sheet="", definitions="", lyrics="",
                 context_lyrics="", section="", shot_times="", has_lyrics=True,
-                extra_rules="", reference_images=False) -> io.NodeOutput:
+                extra_rules="", reference_images=False, music_source="supplied",
+                treatments="music video") -> io.NodeOutput:
         n = max(1, int(chunk_count))
         secs = float(seconds_per_chunk)
+        generated = music_source == "generated"
         notes, parts = [], []
 
         # Only definitions is shown the image, deliberately: the description is
@@ -504,7 +630,7 @@ class MMH3MusicScenePlanPrompt(io.ComfyNode):
             if typography != "off":
                 typo = _TYPO_BEATS % (n, _TYPO_EXACT if typography == "exact lyrics"
                                       else _TYPO_BURST)
-            parts.append(_BEATS % (n, secs, typo))
+            parts.append(_BEATS % (n, n, n - 1, secs, typo))
             if not (lyrics or "").strip():
                 notes.append("no lyrics given, so the beat sheet cannot follow the "
                              "song; wire the sectioned lyric or the alignment's lines")
@@ -524,6 +650,10 @@ class MMH3MusicScenePlanPrompt(io.ComfyNode):
                     "has_lyrics false for an instrumental window.")
 
             branch = _INSTRUMENTAL if not has_lyrics else ""
+            # Without this the words are never asked for: the writer treats the
+            # lyrics as timing for the picture and H3 sings nothing.
+            if generated and has_lyrics:
+                branch += _SUNG_GENERATED
             typo_block = ""
             if has_lyrics and typography == "exact lyrics":
                 typo_block = _TYPO_SHOTS_EXACT + _TYPO_TREATMENT
@@ -564,8 +694,18 @@ class MMH3MusicScenePlanPrompt(io.ComfyNode):
             parts.append(extra_rules.strip())
 
         system = "\n\n".join(parts)
-        report = ("stage: %s | %d chunk%s of %.1fs | typography: %s%s\n%s"
+        system = system.replace(
+            "@@AUDIO_RULES@@", _AUDIO_GENERATED if generated else _AUDIO_SUPPLIED)
+        system = system.replace(
+            "@@TREATMENTS@@",
+            _TREAT_RESTRAINED if treatments == "restrained" else _TREAT_MUSIC_VIDEO)
+        system = system.replace(
+            "@@TREATMENT_MENU@@",
+            _TREAT_MENU_RESTRAINED if treatments == "restrained" else _TREAT_MENU_MV)
+        report = ("stage: %s | %d chunk%s of %.1fs | typography: %s | "
+                  "audio: %s | treatments: %s%s\n%s"
                   % (stage, n, "" if n == 1 else "s", secs, typography,
+                     music_source, treatments,
                      (" | chunk %d of %d%s"
                       % (min(int(beat_index), n - 1) + 1, n,
                          "" if has_lyrics else " (INSTRUMENTAL)"))

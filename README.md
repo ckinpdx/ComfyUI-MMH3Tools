@@ -148,8 +148,8 @@ Beyond this pack and comfy-core:
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention
 through comfy-kitchen's CUDA kernels — it wants `comfy_kitchen` built with `sol_attn`
-(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Seven
-of the eight workflows carry it because it is a speed override, not pipeline logic.
+(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Eight
+of the nine workflows carry it because it is a speed override, not pipeline logic.
 
 **If you do not have it, delete the node** and wire `ModelAttentionBackend` straight
 through to the LoRA loader. Nothing else in the graph depends on it.
@@ -164,6 +164,18 @@ under a **zero** `SolidMask` — held, never sampled — while the looping sampl
 re-samples only the video at the higher resolution. Finishes on a streaming save plus
 a size-capped copy. Distinct from Regenerate-2K, which drives the dedicated
 Regenerate-2K nodes instead of the ladder.
+
+[`workflows/MMH3_LoopingSampler_Masking.json`](workflows/) — masked v2v over an
+existing clip. **SAM3 Detect** (core) mattes a subject, KJNodes' **GrowMaskWithBlur**
+softens it, and the result drives the looping sampler's `denoise_mask`, so the matted
+region re-renders while the rest of the frame is pinned to the encoded source.
+
+It is also the reference for how the two halves are masked **independently**. The
+supplied track is protected by `use_input_audio`, whose pin rides through **MMH3 Split
+AV** (`preserve_masks`) and back through **MMH3 Pack AV** without the sampler being
+told anything about it. Nothing is wired into `audio_denoise_mask`: a subject matte is
+white somewhere in every frame and carries no temporal intent, so it must not be
+allowed to reach the audio half. Wire a mask there only to freeze or free a **span**.
 
 [`workflows/MMH3_Outpaint.json`](workflows/) — reframing, not generation: a landscape
 clip is encoded with **MMH3 Streaming Encode**, extended in the latent by **MMH3
@@ -515,6 +527,22 @@ lyrics against it, slice the alignment by render window, then write prompts.
   singing, asks for visual event instead, and **suppresses typography even when the
   beat sheet assigned it** — there is no line to quote.
 
+  **`music_source`** — `supplied` (default) or `generated`. The rules assume the
+  track exists and will be handed to the sampler; `generated` is for a graph where H3
+  writes the audio in the same pass. It turns `non_diegetic_music` from a description
+  into the **spec the model performs**, stops `overall_soundscape` claiming a track
+  was provided, and — the part nothing else supplies — makes the shots stage quote
+  the window's lyrics as `<d>[English] ...</d>` with the subject **singing** them.
+  Without it the words reach the writer, get spent deciding what the picture does,
+  and none are sung.
+
+  **`treatments`** — `music video` (default) or `restrained`. The default reaches for
+  split frames on purpose, which is a music-video technique rather than an artifact.
+  `restrained` forbids frame division, inset, banded overlay and multiplied
+  performers, and keeps the effect vocabulary optical. For a piece whose subject is
+  the performance, a split frame halves the singer exactly when the mouth is the
+  point.
+
   `reference_images` tells the definitions stage that attached images ARE the
   subject, that several images are one person from different angles, and that the
   image beats the brief on appearance. Definitions only: the description is written
@@ -524,6 +552,33 @@ lyrics against it, slice the alignment by render window, then write prompts.
 
   The whole chain — grid, alignment, the three stages, typography, symptom table —
   is written up in [`docs/music-video.md`](docs/music-video.md).
+
+- **MMH3 Official H3 Tokens** — adds H3's seven special tokens to a CLIP's
+  tokenizer. ComfyUI routes H3 text through the shared `qwen25_tokenizer/`, whose
+  `added_tokens_decoder` stops at **151668**; H3 adds seven ids on top of stock
+  Qwen3-VL, and the model card says its own tokenizer config is required. Without
+  them `<d>` is not a reserved id — it is ordinary subwords that merge with
+  neighbouring whitespace, language tags and punctuation:
+
+  | | `The woman says, <d>[English] We need to leave now.</d>` |
+  |---|---|
+  | stock | `… 'Ġ<' 'd' '>[' 'English' … 'Ġnow' '.</' 'd' '>'` — 17 ids |
+  | patched | `… 'Ġ' '<d>' '[' 'English' … 'Ġnow' '.' '</d>'` — 16 ids |
+
+  Note `'>['` swallowing the language bracket and `'.</'` pulling the sentence's
+  final stop inside the marker.
+
+  It patches a **copy**: `CLIP.clone()` shares its tokenizer by reference, so an
+  in-place edit would follow the loaded model around and survive bypassing the node.
+  The incoming CLIP is untouched, `enabled` off is a pass-through, re-running is a
+  no-op, and it **refuses a non-H3 CLIP** rather than shifting ids some other model
+  does have. The ids are verified against the H3 config after the fact, not assumed
+  from the vocabulary length.
+
+  Wire it between `CLIPLoader` and whatever encodes prompts. The embedding rows
+  exist (`[151936, 5120]`), so the ids are in range — but see
+  [`docs/music-video.md`](docs/music-video.md) for what is and is not known about
+  whether this improves output.
 
 - **MMH3 Load Skill** — loads one file from the pack's `styles/` folder and emits it
   for `extra_rules` on either scene-plan node. **Chain the nodes to stack skills**:
@@ -568,6 +623,43 @@ a choice here — now lives in
   Windows**, so chunk N renders the audio window N's prompt was written against.
   Two carry routes (masked overlap, or a guide), keyframe indices in clip frames,
   and a per-chunk guider swap.
+
+  Its optional **`denoise_mask`** takes a MASK over the whole clip — white
+  regenerates, black keeps the input latent's content — so a region or a span can be
+  held while the rest re-renders. It masks the **video half only**; the audio half is
+  reached solely through `audio_denoise_mask`. The mask is reduced ONCE onto the
+  master grid and
+  merged keep-wins (elementwise min) with whatever mask the latent carried and with
+  the overlap carry, then sliced per chunk, so `_carry_mask` composes with it and
+  nothing in the loop changed.
+
+  Geometry follows the VAE rather than a resize. Spatially it is **pooled, not
+  interpolated** (bilinear averages, and every fractional cell then denoises at its
+  own timestep), then snapped to the **2×2 patch the DiT reads the mask through** —
+  so 32 pixels is the finest feature a mask can express and no token straddles an
+  edge. Temporally it groups on the real `FRAME_PER_TOKEN` cycle `(1,4,4,4,4)`, where
+  the first latent of every 17-frame group covers a **single** frame; a uniform 17/5
+  split puts a temporal edge in the wrong place.
+
+  **`audio_denoise_mask`** masks the audio half, and is the only input that does.
+  Only its TIME axis is read: each frame reduces to one value, then maps onto the
+  audio grid through `_audio_index_at`, the same boundary conversion the chunk loop
+  uses, so a span frozen here lines up with the picture. Left unconnected, audio is
+  masked only by whatever the input latent already carried.
+
+  The two are **independent by design**, which is a correction (2026-08-22). Audio
+  used to be *derived* from the video mask whenever no explicit audio mask was wired,
+  on the reasoning that the two modalities could then never disagree about a frozen
+  span. That is only true of a mask carrying temporal intent. A **spatial** mask — a
+  SAM3 subject matte, say — is white somewhere in every single frame, so the spatial
+  reduction returned "free" at every timestep and regenerated the whole track while
+  the video mask did exactly what was asked. Measured on a subject matte: 75% of the
+  video grid held, 100% of the audio freed. Deriving one modality from the other is
+  not a safety net, so it is gone.
+
+  It **refuses** on a core without per-row masking (#15375), where a mask is accepted
+  and silently ignored, and warns when the input latent is all zeros, since kept
+  regions would pin black. This is a v2v tool.
 
   The sigma schedule can be **windowed per chunk** with `sampling_start_step` /
   `sampling_end_step` — absolute indices, sliced exactly as core `SplitSigmas` does,
@@ -702,6 +794,11 @@ a choice here — now lives in
 - **MiniMax H3 Split AV** — pull an AV latent into plain video and audio latents. The
   exact inverse of Pack AV, so carrying stage 1's audio through an upscale ladder is
   something the graph states rather than a discipline you have to remember.
+  **`preserve_masks`** (default on) hands each half its own `noise_mask`. Pack AV has
+  always had a branch for re-pairing masks, but until 2026-08-22 Split emitted bare
+  `{"samples": ...}` dicts, so there was never anything left to re-pair and a
+  split/repack silently discarded the pin `use_input_audio` installs to protect a
+  supplied track. Turn it off to discard the mask deliberately.
 - **MiniMax H3 Pack AV** — pair a video latent with an audio latent. Encoding real
   footage gives two *separate* plain latents (`VAEEncode` + `VAEEncodeAudio`) and
   nothing joins them. Audio is reconciled to `round(frames / 24 * 40)`. This is a

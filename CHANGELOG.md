@@ -9,7 +9,123 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
-## [Unreleased] — 0.77.0
+## [Unreleased] — 0.78.0
+
+### Added
+- **`MMH3LoopingSampler`: `denoise_mask`, `denoise_mask_mode`, `audio_denoise_mask`
+  (append-only, added after `vae`).** A MASK over the whole clip: white regenerates,
+  black keeps the input latent.
+
+  It reduces once onto the master grid and merges keep-wins into whatever mask the
+  latent already carried, BEFORE the chunk loop — so `_sliced_mask` and `_carry_mask`
+  are untouched and the carry composes with it for free.
+
+  The reduction follows the VAE, not a resize, which is where this differs from
+  handing a pixel mask to `SetLatentNoiseMask` (core trilinear-interpolates that
+  across time, blurring the mask between frames):
+
+  - **spatial**: adaptive pooling, then snapped to the **2×2 latent patch** the DiT
+    reads the mask through. Bilinear would average and produce a fractional value on
+    every edge, and each such cell denoises at its own timestep (`rows_t = 1-m*sigma`).
+    32 pixels is therefore the finest expressible feature.
+  - **temporal**: grouped on the real `FRAME_PER_TOKEN` cycle `(1,4,4,4,4)` via
+    `frame_at_latent`. The first latent of each 17-frame group covers ONE frame and
+    the other four cover four each, so a uniform 17/5 split misplaces an edge.
+    Verified: a mask white on pixel frame 0 alone frees latent 0 and no other.
+  - **audio**: NOT touched by `denoise_mask` at all. `audio_denoise_mask` is the only
+    input that masks the audio half; only its time axis is read, mapped through
+    `_audio_index_at` so a frozen span lines up with the picture, and written on the
+    audio latent's own axes, temporal on **dim 3**. Unconnected, audio is masked only
+    by what the latent already carried.
+
+    An earlier cut of this feature *derived* the audio profile from the video mask
+    when no audio mask was wired, so the two modalities could not disagree about a
+    frozen span. That reasoning only holds for a mask with temporal intent. A spatial
+    mask — a subject matte — is white somewhere in every frame, so the reduction
+    returned "free" at every timestep and regenerated the entire track. Measured on a
+    SAM3 matte: 75% of the video grid held, 100% of the audio freed. Removed before
+    release; the halves are independent.
+
+  Refuses on a core without #15375, where a mask is accepted and silently ignored;
+  warns when the input latent is all zeros, since kept regions would pin black.
+
+  Geometry cross-checked against drozbay's MaskVidExperiments, which handles H3
+  explicitly and independently arrives at the 2×2 token snap and the causal frame
+  cycle.
+
+- **`MMH3SplitAV`: `preserve_masks` (append-only, added LAST).** Default ON. Hands
+  each output half its own `noise_mask`, unbinding the pair when the input carries one
+  and passing a plain tensor straight through for a video-only latent.
+
+  `MMH3PackAV` has always had a branch for carrying masks back into a pair, but Split
+  returned bare `{"samples": ...}` dicts, so a split/repack round trip had nothing
+  left to re-pair. The visible consequence: `use_input_audio` installs a mask pinning
+  the supplied track, and any graph that split the latent to operate on the video half
+  handed the sampler an unmasked track, which was then regenerated. Off restores the
+  old lossy behaviour and reports that it dropped a mask.
+
+  **Default chosen as ON deliberately.** The only graphs whose output changes are ones
+  whose input latent actually carried a mask — exactly the graphs that were already
+  losing it.
+
+- **`MMH3OfficialTokens` — "MMH3 Official H3 Tokens", `MMH3Tools/conditioning`.**
+  Adds H3's seven added special tokens (`<d>` 151669 … `<|caption_end|>` 151675) to a
+  CLIP's tokenizer.
+
+  ComfyUI's chain is `MiniMaxH3Tokenizer` -> `Qwen3VLSDTokenizer` -> `qwen25_tokenizer/`,
+  and that directory is byte-identical to stock Qwen3-VL: 151,643 vocab entries and 26
+  added tokens ending at 151668. H3 ships seven more and its model card states the H3
+  tokenizer config is required. Without them `<d>` tokenizes as ordinary subwords which
+  merge with adjacent whitespace, language tags and punctuation — `' <' 'd' '>['` and
+  `'.</' 'd' '>'` — a different token sequence and different hidden states. Traced and
+  reported by **fredbliss** in `minimax_h3_chatter`, 2026-08-21.
+
+  Implementation notes: it patches a **deep copy** of the tokenizer, because
+  `CLIP.clone()` assigns `n.tokenizer = self.tokenizer` — an in-place patch would stick
+  to the loaded model and survive bypassing the node. It verifies each token landed on
+  its documented id rather than trusting that appending to a 151669-long vocab lands
+  right, and raises without modifying anything if not. It refuses a non-H3 CLIP, since
+  the same seven ids are live vocabulary in other models. `enabled` off is a
+  pass-through so it can stay wired for A/B.
+
+  **Whether it improves output is unmeasured.** The embedding rows exist
+  (`[151936, 5120]`) so the ids are in range, but whether MiniMax trained them is
+  unknown, and the evidence so far is three A/B pairs from one person on one setup,
+  with a measurement that contradicted the listening. This node exists to make the
+  comparison runnable, not because the answer is in.
+
+- **`MMH3MusicScenePlanPrompt`: `music_source` and `treatments` (both append-only,
+  added LAST, defaults preserve existing behaviour byte for byte).**
+
+  **`music_source`** — `supplied` (default) / `generated`. The node was written for
+  the case where the track exists and is handed to the sampler, and it says so in the
+  rules: *"THE SONG IS THE AUDIO"*, *"you are describing something that already
+  exists and will be supplied as audio"*. Pointed at a graph where H3 writes the
+  audio in the same pass, it faithfully produced prompts describing a track that
+  would be supplied, and **quoted no lyrics at all** — the sung words reached the
+  writer and were spent on deciding what the picture did. The result was coherent
+  instrumental music under a mouth that sang nothing.
+
+  `generated` swaps two rule blocks and adds a third. `overall_soundscape` stops
+  claiming a track was provided and becomes ambience-and-action-sound only.
+  `non_diegetic_music` becomes the SPEC the model performs — genre, hedged tempo,
+  instruments named with a playing style, the invariants restated every chunk, one
+  movement clause. And the shots stage gains a block requiring the window's lyrics
+  VERBATIM as `<d>[English] ...</d>`, attributed with SINGS rather than says, with
+  the singing described physically and cuts timed to the voice. Without that block
+  nothing asks for words and none are sung.
+
+  **`treatments`** — `music video` (default) / `restrained`. The default pushes split
+  frames hard (*"SPLIT FRAMES ARE A TOOL HERE, so reach for them on purpose"*,
+  *"Known to render well: split frames"*), which is right for a lyric-video look and
+  wrong when the subject is the performance: a divided frame halves the singer
+  exactly when the mouth is the point. `restrained` forbids frame division, inset,
+  banded overlay and multiplied performers, and swaps the effect menu for optical
+  treatments only.
+
+  The two are independent. Generated audio with music-video treatments is a valid
+  combination; so is a supplied track shot restrained.
+
 
 ### Added
 - **Two example workflows: `MMH3_Looping_Upscale` and `MMH3_Outpaint`.** Upscale is a
@@ -323,6 +439,14 @@ the entry, and migrate any local workflow in the same commit.
   they are not established as the cure.
 
 ### Fixed — documentation
+
+- **`docs/regenerate-2k.md`: `ref_downscale` is closed as a cost lever.** Measured
+  2026-08-21 — `2x` came back much worse. The cost arithmetic was right (references
+  are attended at every step, so 2x cuts their cost ~4x) but the saving is not
+  spendable: this route is in-context regeneration, not super-resolution, so the
+  reference IS the detail the 2K pass reads back out. Since the options are only
+  `none`/`2x`/`4x`, the gentlest setting is the one that failed and there is nothing
+  milder left to try. Moved out of the open-questions list with the answer attached.
 - **`docs/regenerate-2k.md` — recorded the model-card vs AMA question on Regenerate-2K,
   with a reconciling reading flagged as conjecture.** The model card says the 2K pass
   *"uses the H3 base model to regenerate its own low-resolution result"* (no separate
@@ -370,6 +494,13 @@ the entry, and migrate any local workflow in the same commit.
   appended later, which is what makes them easy to cross.
 
 ### Fixed
+
+- **`MMH3PromptPart` warns when the text never split.** With one piece and `clamp`
+  on, EVERY index returned the whole body, so each chunk was spliced with the entire
+  beat sheet instead of its own beat — silently, and the damage surfaced downstream as
+  an apparent model failure rather than here as a split failure. Now logs a warning and
+  puts `NO SPLIT` in the node's notes. Behaviour is otherwise unchanged: this is a
+  diagnostic, not a raise.
 - **A prompt nested inside its own `detailed_description`.** Observed 2026-08-17: chunk
   0 was clean, every chunk after it contained a complete six-section prompt spliced
   into its own body, with a second `overall_soundscape` / `non_diegetic_music` pair

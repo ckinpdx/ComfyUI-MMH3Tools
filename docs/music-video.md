@@ -52,9 +52,10 @@ Three structural facts drive almost every decision below.
    from forced alignment against the real vocal. Nothing downstream guesses a time.
 2. **The window grid is uniform and fixed before any prompt is written.** Sections
    are context, not structure — see §2.
-3. **The audio is pinned, not generated.** `non_diegetic_music` describes *this*
-   track rather than composing an alternative, and `overall_soundscape` opens with
-   "the song is the audio" so the model does not invent room tone competing with it.
+3. **The audio is pinned, not generated** — in the default `supplied` mode.
+   `non_diegetic_music` describes *this* track rather than composing an alternative,
+   and `overall_soundscape` opens with "the song is the audio" so the model does not
+   invent room tone competing with it. See §5b when H3 is writing the audio instead.
 
 ---
 
@@ -172,6 +173,42 @@ character anyway.
 
 **Definitions only.** The description is written once and reused; re-deriving it per
 call is exactly how a subject drifts across a song.
+
+---
+
+## 5b. When H3 generates the audio — `music_source: generated`
+
+Everything above assumes a finished track. If the audio comes out of the *same* H3
+pass as the picture, the default rules are actively wrong: they tell the model the
+song "already exists and will be supplied", and it writes prompts describing a track
+nobody is going to hand it.
+
+**Observed 2026-08-21.** A 90-second generate run produced coherent music across all
+eight windows — and no sung words at all. Every prompt said the vocal was "prominent
+and emotive"; not one contained a lyric. The words were reaching the writer and being
+spent on where to put the camera.
+
+`music_source: generated` changes three things:
+
+- **`overall_soundscape`** stops asserting a provided track. It becomes ambience and
+  action sound only — never the vocal, never the backing — and `N/A` when the picture
+  implies none.
+- **`non_diegetic_music`** becomes the **spec the model performs**, not a
+  description: genre, hedged tempo, instruments named with a playing style, the
+  invariants restated in every chunk, one movement clause for the shape within it.
+- **The shots stage must quote the words.** `<d>[English] the words</d>`, verbatim,
+  attributed with **sings** rather than says, singing described physically, cuts
+  timed to the voice. This is the part nothing else in the chain supplies — the
+  lyrics stage writes words, but only this block asks H3 to sing them.
+
+The audio sections stop being afterthoughts here. In `supplied` mode a real track
+carries the sound whatever the prompt says; in `generated` mode those two sections
+*are* the music, and a thin one gives you a thin song.
+
+Independent of this: **`treatments: restrained`** turns off the split-frame push. The
+default reaches for divided frames on purpose, which is right for a lyric-video look
+and wrong when the subject is a performance — a split frame halves the singer exactly
+when the mouth is the point.
 
 ---
 

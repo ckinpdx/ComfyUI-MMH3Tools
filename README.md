@@ -122,6 +122,19 @@ cut to hide the seam. **MMH3 Chunk Schedule** paces the spoken-word budget per w
 builds its own prompts (**MMH3 Load Skill** + an LLM) ahead of a three-window looping
 sampler, finishing on a chunked pixel-upscale ladder.
 
+[`workflows/MMH3_Looping_I2V_ManualPrompt.json`](workflows/) — the same
+image-to-video start with the prompt **typed, not generated**: no LLM anywhere in the
+graph, just a `PrimitiveStringMultiline` feeding **MMH3 Reference MultiPrompt**. Use it
+when you already know the shot and want the prompt-building half out of the way.
+
+It is also the fullest example of the **three-stage ladder**. One looping sampler
+generates at 192-frame chunks, then two more refine passes each sit behind their own
+**MMH3 Chunked Pixel Upscale** (`rtx_vsr`, 2688x1536) at the size **MMH3 Upscale
+Ladder** picks. The last pass splits the pair and pins the audio under a **zero**
+`SolidMask` before re-packing, so only the picture is resampled and the track that
+came out of stage one survives both passes untouched. Finishes on a streaming save
+plus a size-capped copy.
+
 [`workflows/MMH3_LoopingSampler_MusicVideo.json`](workflows/) — the music-video
 variant: windows are locked to musical beats and lyrics mapped per window, feeding the
 looping sampler; full-res and size-capped saves.
@@ -148,8 +161,8 @@ Beyond this pack and comfy-core:
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention
 through comfy-kitchen's CUDA kernels — it wants `comfy_kitchen` built with `sol_attn`
-(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Eight
-of the nine workflows carry it because it is a speed override, not pipeline logic.
+(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Nine
+of the ten workflows carry it because it is a speed override, not pipeline logic.
 
 **If you do not have it, delete the node** and wire `ModelAttentionBackend` straight
 through to the LoRA loader. Nothing else in the graph depends on it.

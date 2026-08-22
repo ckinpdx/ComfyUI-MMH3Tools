@@ -12,6 +12,18 @@ the entry, and migrate any local workflow in the same commit.
 ## [Unreleased] — 0.78.0
 
 ### Added
+
+- **Two example workflows.** `MMH3_LoopingSampler_Masking.json` — masked v2v, and the
+  reference for masking the two halves separately: a SAM3 matte drives `denoise_mask`
+  while the supplied track rides through on the Split AV pin, with nothing wired to
+  `audio_denoise_mask` on purpose. `MMH3_Looping_I2V_ManualPrompt.json` — image-to-video
+  with the prompt typed rather than generated, and the fullest example of the
+  three-stage ladder (generate, then two pixel-upscale refine passes, the last holding
+  audio under a zero `SolidMask`).
+
+  Both were saved from a session running the pre-0.78.0 schema, so ManualPrompt
+  carried `prior_av_latent` / `speed_schedule` sockets that no longer exist; stripped
+  with link target-slot renumbering before landing.
 - **`MMH3LoopingSampler`: `denoise_mask`, `denoise_mask_mode`, `audio_denoise_mask`
   (append-only, added after `vae`).** A MASK over the whole clip: white regenerates,
   black keeps the input latent.

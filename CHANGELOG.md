@@ -9,6 +9,36 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.79.0
+
+### Added
+
+- **`MMH3StreamingSave`: `save_metadata` (append-only, added LAST), default on.**
+  Embeds the workflow and prompt in the mp4, so dragging the file back into ComfyUI
+  restores the graph — the node previously declared no `hidden` inputs and so never
+  saw either.
+
+  Two things decide the implementation, and both are easy to get silently wrong:
+
+  - **It cannot be a command-line argument.** A real workflow is 45–95 KB
+    (`MMH3_LoopingSampler_Masking.json` is 45,028 chars) and Windows caps a command
+    line near 32,767, so the tags go in an **ffmetadata file** read as a second input.
+  - **mp4 drops unknown tags** without `-movflags use_metadata_tags`. Core sets the
+    same flag for isobmff. Without it `workflow` and `prompt` vanish with no error.
+
+  Metadata is attached to the FIRST pass, so both endings inherit it: the silent
+  path's `os.replace` keeps the file as-is, and the audio mux carries the tags through
+  `-c:v copy`. Verified round-tripping the real workflow through both paths — parsed
+  back identical, emoji in node titles intact.
+
+  **`faststart` is deliberately not used.** It relocates the moov atom by rewriting
+  the whole file at the end, which would undo this node's constant-cost promise on
+  exactly the long renders it exists for. Core can afford it because its saver holds
+  the video in memory anyway.
+
+  ComfyUI's `--disable-metadata` wins over the widget. Turn the widget off for files
+  you are sending out: the workflow carries every prompt and path in the graph.
+
 ## [Unreleased] — 0.78.1
 
 ### Fixed

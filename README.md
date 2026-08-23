@@ -794,7 +794,12 @@ a choice here — now lives in
 - **MiniMax H3 Streaming Encode** / **MMH3 Streaming Save** — encode and export
   in bounded RAM. Save decodes group by group and writes as it goes rather than
   holding the whole clip, which is the difference between exporting a long master and
-  running out of memory. Slower per frame; for long videos only.
+  running out of memory. Slower per frame; for long videos only. `save_metadata` (default on) embeds
+  the workflow and prompt so the file drags back into ComfyUI; it goes in an
+  ffmetadata file rather than a command-line argument because a workflow is 45–95 KB
+  and Windows caps a command line near 32,767 characters. `faststart` is deliberately
+  not applied — relocating the moov atom rewrites the whole file and would undo the
+  constant-cost decode this node exists for.
 - **MMH3 Size Capped Copy** — a second copy of a finished file under a hard size
   ceiling, for upload limits. Chains off Streaming Save's `file_path`; takes any
   video, not just H3 output. `target_mb` is a **ceiling, never a target**: a file

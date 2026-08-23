@@ -82,6 +82,43 @@ DEFAULTS = {"clip_length": 17, "token_drop": 3, "vae_ratio_t": 4}
 TAIL_FRAMES = 5
 
 
+def write_ffmetadata(path, tags):
+    """An ffmetadata1 file for `-f ffmetadata -i path`.
+
+    A workflow JSON runs 45-95 KB. Windows caps a command line near 32,767
+    characters, so `-metadata workflow=...` cannot carry one -- the file form is
+    not a tidiness choice, it is the only form that fits.
+
+    ffmpeg's escapes are = ; # \\ and newline; everything else is literal, and
+    the file is UTF-8 so emoji in node titles survive.
+    """
+    out = [";FFMETADATA1"]
+    for key, value in tags.items():
+        value = (value.replace("\\", "\\\\").replace("=", "\\=")
+                      .replace(";", "\\;").replace("#", "\\#")
+                      .replace("\n", "\\\n"))
+        out.append("%s=%s" % (key, value))
+    with open(path, "w", encoding="utf-8", newline="") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def collect_metadata(prompt, extra_pnginfo):
+    """ComfyUI's saved-workflow tags, or {} when metadata is disabled."""
+    try:
+        from comfy.cli_args import args
+        if args.disable_metadata:
+            return {}
+    except Exception:
+        pass
+    tags = {}
+    if prompt is not None:
+        tags["prompt"] = json.dumps(prompt)
+    if extra_pnginfo is not None:
+        for k, v in extra_pnginfo.items():
+            tags[k] = json.dumps(v)      # "workflow" is the one that drag-drops
+    return tags
+
+
 def vae_grid(vae):
     """(tokens_chunk_size, token_overlap, frames_per_group) read from the VAE itself.
 
@@ -224,14 +261,27 @@ class MMH3StreamingSave(io.ComfyNode):
                             "imageio-ffmpeg, taking the first that actually has a working "
                             "H.264 encoder.",
                 ),
+                io.Boolean.Input(
+                    "save_metadata", default=True, optional=True,
+                    tooltip="Embed the workflow and prompt in the mp4, so dragging the "
+                            "file back into ComfyUI restores the graph. Written as an "
+                            "ffmetadata file rather than a command-line argument because "
+                            "a workflow is 45-95 KB and Windows caps a command line near "
+                            "32,767 characters.\n\n"
+                            "Turn OFF for files you are sending out: the workflow "
+                            "carries every prompt and path in the graph. ComfyUI's own "
+                            "--disable-metadata also wins over this.",
+                ),
             ],
+            hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             outputs=[io.String.Output(display_name="file_path")],
             is_output_node=True,
         )
 
     @classmethod
     def execute(cls, latent, vae, groups_per_chunk, fps, filename_prefix, crf,
-                audio=None, video_encoder="auto", ffmpeg_path="") -> io.NodeOutput:
+                audio=None, video_encoder="auto", ffmpeg_path="",
+                save_metadata=True) -> io.NodeOutput:
         video, _ = unpack_av(latent, "latent", allow_video_only=True)
         video = video[:1]
         T = int(video.shape[2])
@@ -260,6 +310,22 @@ class MMH3StreamingSave(io.ComfyNode):
             filename_prefix, out_dir)
         video_tmp = os.path.join(full_folder, "%s_%05d_tmp.mp4" % (fname, counter))
         final_path = os.path.join(full_folder, "%s_%05d.mp4" % (fname, counter))
+
+        # Attached to the FIRST pass so both endings inherit it: the silent path's
+        # os.replace keeps the file as-is, and the audio mux carries the tags through
+        # -c:v copy.
+        meta_tmp = None
+        meta_args = []
+        if save_metadata:
+            tags = collect_metadata(cls.hidden.prompt, cls.hidden.extra_pnginfo)
+            if tags:
+                meta_tmp = os.path.join(full_folder, "%s_%05d_tmp.ffmeta" % (fname, counter))
+                write_ffmetadata(meta_tmp, tags)
+                meta_args = ["-f", "ffmetadata", "-i", meta_tmp,
+                             "-map", "0:v", "-map_metadata", "1",
+                             "-movflags", "use_metadata_tags"]
+                logging.info("[MMH3StreamingSave] embedding %s (%d bytes)",
+                             ", ".join(sorted(tags)), os.path.getsize(meta_tmp))
 
         proc = None
         written = 0
@@ -308,6 +374,7 @@ class MMH3StreamingSave(io.ComfyNode):
                         [ffmpeg, "-y", "-loglevel", "error",
                          "-f", "rawvideo", "-pix_fmt", "rgb24",
                          "-s", "%dx%d" % (W, H), "-r", str(fps), "-i", "pipe:"]
+                        + meta_args
                         + cls._encoder_args(encoder, crf, W, H) + [video_tmp],
                         stdin=subprocess.PIPE, stderr=err_file)
 
@@ -370,7 +437,9 @@ class MMH3StreamingSave(io.ComfyNode):
                     [ffmpeg, "-y", "-loglevel", "error", "-i", video_tmp,
                      "-f", "f32le", "-ar", str(int(audio["sample_rate"])),
                      "-ac", str(channels), "-i", pcm_tmp,
-                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", final_path],
+                     "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest"]
+                    + (["-movflags", "use_metadata_tags"] if meta_args else [])
+                    + [final_path],
                     stderr=subprocess.PIPE)
                 if mux.returncode != 0:
                     t = (mux.stderr[-2000:].decode("utf-8", "replace").strip()
@@ -388,6 +457,12 @@ class MMH3StreamingSave(io.ComfyNode):
             os.remove(video_tmp)
         else:
             os.replace(video_tmp, final_path)
+
+        if meta_tmp is not None:
+            try:
+                os.remove(meta_tmp)
+            except OSError:
+                pass
 
         logging.info("[MMH3StreamingSave] %d frames (%.2fs) -> %s",
                      written, written / float(fps), final_path)

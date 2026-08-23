@@ -4,7 +4,7 @@ from .nodes_loop import MMH3SeedOverlap, MMH3ConcatAV, MMH3FindDivergence, MMH3J
 from .nodes_align import MMH3ForcedAlign
 from .nodes_lyricwindows import MMH3LyricsToWindows
 from .nodes_motion import MMH3MotionOverload
-from .nodes_schedule import MMH3ChunkSchedule
+from .nodes_schedule import MMH3ChunkSchedule, MMH3ChunkScheduleFrames
 from .nodes_music_analysis import MMH3MusicAnalysis
 from .nodes_musicscene import MMH3MusicScenePlanPrompt
 from .nodes_stylepack import MMH3LoadSkill
@@ -74,6 +74,7 @@ NODES = [
     MMH3ContextWindows,
     # MMH3Tools/calculators
     MMH3ChunkSchedule,
+    MMH3ChunkScheduleFrames,
     MMH3WindowPlan,
     MMH3KeyframePlanner,
     MMH3UpscaleLadder,

@@ -82,6 +82,17 @@ def seconds_to_groups(seconds):
     return max(0, int(j))
 
 
+def frames_to_groups(frames):
+    """Nearest `j` to a frame count. The frames variant's ONLY added conversion.
+
+    `seconds_to_groups` multiplies by FPS and then lands here; asking in frames just
+    skips that multiply. Everything downstream -- the tiling search, av_align, the
+    overlap ladder -- is unit-free, which is why the two nodes share all of it.
+    """
+    j = round((float(frames) - FRAME_BASE) / float(FRAMES_PER_GROUP))
+    return max(0, int(j))
+
+
 def chunk_count(c, a, b):
     """Chunks for a regular schedule, or None when it does not tile."""
     stride = a - b
@@ -231,132 +242,219 @@ class MMH3ChunkSchedule(io.ComfyNode):
     @classmethod
     def execute(cls, total_seconds, window_seconds, overlap_seconds,
                 prefer="keep total", chunks=0, av_align="ignore") -> io.NodeOutput:
-        c_req = seconds_to_groups(total_seconds)
-        a_req = seconds_to_groups(window_seconds)
-        b_req = seconds_to_groups(overlap_seconds)
-        want = int(chunks)
+        return solve_and_report(
+            seconds_to_groups(total_seconds), seconds_to_groups(window_seconds),
+            seconds_to_groups(overlap_seconds), prefer, chunks, av_align,
+            "  asked for %.2fs / %.2fs / %.2fs" % (
+                total_seconds, window_seconds, overlap_seconds))
 
-        notes = []
-        # Relax in the order that costs least. Moving the deliverable LENGTH by a
-        # group is cheaper than silently changing how many chunks and prompts the
-        # piece has, so the chunk count is the LAST thing given up -- an earlier
-        # ordering released the count first and then honoured it anyway, so the
-        # report claimed a release that had not happened.
-        found = solve(c_req, a_req, b_req, prefer, want_chunks=want,
-                      av_align=av_align)
-        if found is None and av_align == "require":
-            # 60s is the worked example: its total is 84 groups, 0 mod 3, and an
-            # aligned schedule needs 2 mod 3 -- so NOTHING at that exact length
-            # qualifies however the window and overlap move.
-            found = solve(c_req, a_req, b_req, "nearest", want_chunks=want,
-                          av_align="require")
-            if found is not None:
-                notes.append("no aligned schedule exists at this exact length, so the "
-                             "total was allowed to move -- alignment needs the total's "
-                             "group count to be 2 mod 3")
-        if found is None and want:
-            found = solve(c_req, a_req, b_req, prefer, av_align=av_align)
-            if found is not None:
-                notes.append("no schedule with exactly %d chunks fits this length and "
-                             "overlap, so the count was released and solved from the "
-                             "window instead" % want)
-        if found is None:
-            # never raise: emit the request, snapped, and say it does not tile
-            c, a, b = c_req, a_req, b_req
-            n = None
-            notes.append("no schedule near this request tiles evenly, so the numbers "
-                         "below are your request snapped to the grid and NOT solved -- "
-                         "expect a clamped final window")
-        else:
-            c, a, b, n = found
 
-        total_f = snap_frames(latents_to_frames(from_groups(c)))
-        window_f = latents_to_frames(from_groups(a))
-        overlap_f = latents_to_frames(from_groups(b)) if b > 0 else FRAME_BASE
-        stride_f = window_f - overlap_f
+class MMH3ChunkScheduleFrames(io.ComfyNode):
+    """The same solver, asked in frames."""
 
-        def moved(label, req, got, unit_s=FRAMES_PER_GROUP / float(FPS)):
-            if req == got:
-                return None
-            return "%s %+.2fs (%d group%s)" % (label, (got - req) * unit_s,
-                                               got - req, "" if abs(got - req) == 1 else "s")
+    @classmethod
+    def define_schema(cls):
+        return io.Schema(
+            node_id="MMH3ChunkScheduleFrames",
+            display_name="MMH3 Chunk Schedule (Frames)",
+            category="MMH3Tools/calculators",
+            description=(
+                "MMH3 Chunk Schedule asked in FRAMES instead of seconds. Identical "
+                "solver, identical grid rules, identical outputs -- it just skips the "
+                "seconds-to-frames conversion, for when you already hold frame counts "
+                "and do not want a duration rounded on the way in.\n\n"
+                "Values still SNAP to the 17j+5 grid and are still solved together so "
+                "the schedule tiles. Asking in frames does not mean asking for "
+                "arbitrary frames."
+            ),
+            inputs=[
+                io.Int.Input(
+                    "total_frames", default=1433, min=5, max=14405, step=1,
+                    tooltip="Roughly how many frames the finished piece should be. "
+                            "Snapped to the nearest 17j+5; `prefer` decides whether it "
+                            "may move further than that. Off-grid values are rounded, "
+                            "not refused."),
+                io.Int.Input(
+                    "window_frames", default=481, min=5, max=3605, step=1,
+                    tooltip="Roughly how many frames each chunk covers. Moves to "
+                            "whatever makes the schedule tile."),
+                io.Int.Input(
+                    "overlap_frames", default=73, min=0, max=1445, step=1,
+                    tooltip="Roughly how many frames of the previous chunk each chunk "
+                            "carries. Moves with the window."),
+                io.Combo.Input(
+                    "prefer", options=["keep total", "nearest", "fewer chunks"],
+                    default="keep total", optional=True,
+                    tooltip="What may move. `keep total` holds the length and shifts the "
+                            "window and overlap. `nearest` lets the length move a few "
+                            "groups to find a closer fit. `fewer chunks` takes the "
+                            "shortest chunk list it can, holding the length."),
+                io.Int.Input(
+                    "chunks", default=0, min=0, max=40, step=1, optional=True,
+                    tooltip="How many chunks you want. 0 lets the solver choose from "
+                            "the window instead. Setting this makes the WINDOW a result "
+                            "rather than a second guess, and it is usually the number "
+                            "you have an opinion about: it is how many prompts you "
+                            "write and how many joins the piece has."),
+                io.Combo.Input(
+                    "av_align", options=["ignore", "prefer", "require"],
+                    default="ignore", optional=True,
+                    tooltip="Whether the overlap and the stride must land whole on H3's "
+                            "40 Hz audio grid. Off the grid they round, and the "
+                            "preserved audio pins to an instant up to a third of a tick "
+                            "(8.3 ms) from the preserved video. `prefer` ranks aligned "
+                            "schedules first, `require` returns only aligned ones and "
+                            "will move the total to find one. Matters when each chunk "
+                            "GENERATES its audio; a supplied master track pinned at "
+                            "mask 0 has no per-chunk audio seam to misalign."),
+            ],
+            outputs=[
+                io.Int.Output(display_name="total_frames"),
+                io.Int.Output(display_name="window_frames"),
+                io.Int.Output(display_name="overlap_frames"),
+                io.Int.Output(display_name="chunk_count"),
+                io.Float.Output(display_name="seconds_per_chunk"),
+                io.String.Output(display_name="report"),
+            ],
+        )
 
-        moves = [m for m in (moved("total", c_req, c), moved("window", a_req, a),
-                             moved("overlap", b_req, b)) if m]
+    @classmethod
+    def execute(cls, total_frames, window_frames, overlap_frames,
+                prefer="keep total", chunks=0, av_align="ignore") -> io.NodeOutput:
+        return solve_and_report(
+            frames_to_groups(total_frames), frames_to_groups(window_frames),
+            frames_to_groups(overlap_frames), prefer, chunks, av_align,
+            "  asked for %d / %d / %d frames" % (
+                int(total_frames), int(window_frames), int(overlap_frames)))
 
-        if b == 0:
-            notes.append("overlap solved to 0 -- chunks share nothing, so every join is "
-                         "a hard cut")
 
-        lines = ["MMH3 Chunk Schedule -- %s" % ("%d chunks, all regular" % n if n
-                                                else "NOT SOLVED"), ""]
-        lines.append("  total    %5d frames  %7.2fs   %4d latents"
-                     % (total_f, total_f / float(FPS), from_groups(c)))
-        lines.append("  window   %5d frames  %7.2fs   %4d latents"
-                     % (window_f, window_f / float(FPS), from_groups(a)))
-        lines.append("  overlap  %5d frames  %7.2fs   %4d latents"
-                     % (overlap_f, overlap_f / float(FPS),
-                        from_groups(b) if b > 0 else LATENT_BASE))
-        lines.append("  stride   %5d frames  %7.2fs" % (stride_f, stride_f / float(FPS)))
+def solve_and_report(c_req, a_req, b_req, prefer, chunks, av_align, asked_line):
+    """Everything both nodes do once their request is expressed in GROUPS.
+
+    Shared rather than duplicated. `asked_line` is the one genuinely unit-dependent
+    thing in the report, so each node supplies its own and the rest is common.
+    """
+    want = int(chunks)
+
+    notes = []
+    # Relax in the order that costs least. Moving the deliverable LENGTH by a
+    # group is cheaper than silently changing how many chunks and prompts the
+    # piece has, so the chunk count is the LAST thing given up -- an earlier
+    # ordering released the count first and then honoured it anyway, so the
+    # report claimed a release that had not happened.
+    found = solve(c_req, a_req, b_req, prefer, want_chunks=want,
+                  av_align=av_align)
+    if found is None and av_align == "require":
+        # 60s is the worked example: its total is 84 groups, 0 mod 3, and an
+        # aligned schedule needs 2 mod 3 -- so NOTHING at that exact length
+        # qualifies however the window and overlap move.
+        found = solve(c_req, a_req, b_req, "nearest", want_chunks=want,
+                      av_align="require")
+        if found is not None:
+            notes.append("no aligned schedule exists at this exact length, so the "
+                         "total was allowed to move -- alignment needs the total's "
+                         "group count to be 2 mod 3")
+    if found is None and want:
+        found = solve(c_req, a_req, b_req, prefer, av_align=av_align)
+        if found is not None:
+            notes.append("no schedule with exactly %d chunks fits this length and "
+                         "overlap, so the count was released and solved from the "
+                         "window instead" % want)
+    if found is None:
+        # never raise: emit the request, snapped, and say it does not tile
+        c, a, b = c_req, a_req, b_req
+        n = None
+        notes.append("no schedule near this request tiles evenly, so the numbers "
+                     "below are your request snapped to the grid and NOT solved -- "
+                     "expect a clamped final window")
+    else:
+        c, a, b, n = found
+
+    total_f = snap_frames(latents_to_frames(from_groups(c)))
+    window_f = latents_to_frames(from_groups(a))
+    overlap_f = latents_to_frames(from_groups(b)) if b > 0 else FRAME_BASE
+    stride_f = window_f - overlap_f
+
+    def moved(label, req, got, unit_s=FRAMES_PER_GROUP / float(FPS)):
+        if req == got:
+            return None
+        return "%s %+.2fs (%d group%s)" % (label, (got - req) * unit_s,
+                                           got - req, "" if abs(got - req) == 1 else "s")
+
+    moves = [m for m in (moved("total", c_req, c), moved("window", a_req, a),
+                         moved("overlap", b_req, b)) if m]
+
+    if b == 0:
+        notes.append("overlap solved to 0 -- chunks share nothing, so every join is "
+                     "a hard cut")
+
+    lines = ["MMH3 Chunk Schedule -- %s" % ("%d chunks, all regular" % n if n
+                                            else "NOT SOLVED"), ""]
+    lines.append("  total    %5d frames  %7.2fs   %4d latents"
+                 % (total_f, total_f / float(FPS), from_groups(c)))
+    lines.append("  window   %5d frames  %7.2fs   %4d latents"
+                 % (window_f, window_f / float(FPS), from_groups(a)))
+    lines.append("  overlap  %5d frames  %7.2fs   %4d latents"
+                 % (overlap_f, overlap_f / float(FPS),
+                    from_groups(b) if b > 0 else LATENT_BASE))
+    lines.append("  stride   %5d frames  %7.2fs" % (stride_f, stride_f / float(FPS)))
+    lines.append("")
+    lines.append("  40 Hz audio grid   overlap %-9s stride %s"
+                 % ("EXACT" if is_av_exact(overlap_f) else "off by 1/3 tick,",
+                    "EXACT" if is_av_exact(stride_f) else "off by 1/3 tick (8.3 ms)"))
+    lines.append("")
+    lines.append(asked_line + ("  ->  moved " + ", ".join(moves) if moves
+                               else "  ->  landed on the grid unchanged"))
+    if n:
+        lines.append("  tiling   (%d - %d) %% %d = 0"
+                     % (from_groups(c), from_groups(a), from_groups(a) - from_groups(b)))
         lines.append("")
-        lines.append("  40 Hz audio grid   overlap %-9s stride %s"
-                     % ("EXACT" if is_av_exact(overlap_f) else "off by 1/3 tick,",
-                        "EXACT" if is_av_exact(stride_f) else "off by 1/3 tick (8.3 ms)"))
+        lines.append("  chunks")
+        for i in range(n):
+            f0 = i * stride_f
+            lines.append("    %d: %7.2fs - %7.2fs" % (i, f0 / float(FPS),
+                                                      (f0 + window_f) / float(FPS)))
+    if n:
+        options = reachable_overlaps(c, n)
+        if len(options) > 1:
+            # a rung is only REACHABLE if its whole schedule qualifies. Marking
+            # rungs by the overlap alone offered options the solver would never
+            # take: under `require` the STRIDE must land on the grid too, which
+            # removes two of every three.
+            ok = [o for o in options if schedule_av_exact(o + (c - o) // n, o)]
+            here = options.index(b) if b in options else -1
+            lo = max(0, here - 2) if here >= 0 else 0
+            shown = options[lo:lo + 6]
+            lines.append("")
+            lines.append("  reachable overlaps at %d chunks -- the COUNT is the "
+                         "step (%d group%s = %d latents)"
+                         % (n, n, "" if n == 1 else "s", n * LATENTS_PER_GROUP))
+            for opt in shown:
+                of_f = latents_to_frames(from_groups(opt)) if opt > 0 else FRAME_BASE
+                st_f = latents_to_frames(from_groups(opt + (c - opt) // n)) - of_f
+                lines.append("    %s %4d latents  %5d frames  %6.2fs   stride %6.2fs %s"
+                             % ("->" if opt == b else "  ", from_groups(opt),
+                                of_f, of_f / float(FPS), st_f / float(FPS),
+                                "  AUDIO-GRID" if opt in ok else ""))
+            lines.append("    nothing sits between these; a finer overlap needs a "
+                         "different chunk count, or `prefer` off `keep total`.")
+            if av_align != "ignore":
+                step = (ok[1] - ok[0]) * LATENTS_PER_GROUP if len(ok) > 1 else 0
+                lines.append("    av_align=%s, so ONLY the AUDIO-GRID rows are "
+                             "reachable -- the stride has to land on the grid too, "
+                             "which steps them %d latents apart, not %d."
+                             % (av_align, step, n * LATENTS_PER_GROUP))
+            elif not ok:
+                lines.append("    none of them is on the 40 Hz audio grid at %d "
+                             "chunks -- try `av_align` if this clip generates its "
+                             "own audio per chunk" % n)
+
+    if notes:
         lines.append("")
-        lines.append("  asked for %.2fs / %.2fs / %.2fs%s"
-                     % (total_seconds, window_seconds, overlap_seconds,
-                        ("  ->  moved " + ", ".join(moves)) if moves
-                        else "  ->  landed on the grid unchanged"))
-        if n:
-            lines.append("  tiling   (%d - %d) %% %d = 0"
-                         % (from_groups(c), from_groups(a), from_groups(a) - from_groups(b)))
-            lines.append("")
-            lines.append("  chunks")
-            for i in range(n):
-                f0 = i * stride_f
-                lines.append("    %d: %7.2fs - %7.2fs" % (i, f0 / float(FPS),
-                                                          (f0 + window_f) / float(FPS)))
-        if n:
-            options = reachable_overlaps(c, n)
-            if len(options) > 1:
-                # a rung is only REACHABLE if its whole schedule qualifies. Marking
-                # rungs by the overlap alone offered options the solver would never
-                # take: under `require` the STRIDE must land on the grid too, which
-                # removes two of every three.
-                ok = [o for o in options if schedule_av_exact(o + (c - o) // n, o)]
-                here = options.index(b) if b in options else -1
-                lo = max(0, here - 2) if here >= 0 else 0
-                shown = options[lo:lo + 6]
-                lines.append("")
-                lines.append("  reachable overlaps at %d chunks -- the COUNT is the "
-                             "step (%d group%s = %d latents)"
-                             % (n, n, "" if n == 1 else "s", n * LATENTS_PER_GROUP))
-                for opt in shown:
-                    of_f = latents_to_frames(from_groups(opt)) if opt > 0 else FRAME_BASE
-                    st_f = latents_to_frames(from_groups(opt + (c - opt) // n)) - of_f
-                    lines.append("    %s %4d latents  %5d frames  %6.2fs   stride %6.2fs %s"
-                                 % ("->" if opt == b else "  ", from_groups(opt),
-                                    of_f, of_f / float(FPS), st_f / float(FPS),
-                                    "  AUDIO-GRID" if opt in ok else ""))
-                lines.append("    nothing sits between these; a finer overlap needs a "
-                             "different chunk count, or `prefer` off `keep total`.")
-                if av_align != "ignore":
-                    step = (ok[1] - ok[0]) * LATENTS_PER_GROUP if len(ok) > 1 else 0
-                    lines.append("    av_align=%s, so ONLY the AUDIO-GRID rows are "
-                                 "reachable -- the stride has to land on the grid too, "
-                                 "which steps them %d latents apart, not %d."
-                                 % (av_align, step, n * LATENTS_PER_GROUP))
-                elif not ok:
-                    lines.append("    none of them is on the 40 Hz audio grid at %d "
-                                 "chunks -- try `av_align` if this clip generates its "
-                                 "own audio per chunk" % n)
+        lines.extend("  ! " + x for x in notes)
 
-        if notes:
-            lines.append("")
-            lines.extend("  ! " + x for x in notes)
-
-        report = "\n".join(lines)
-        logging.info("[MMH3ChunkSchedule] %s frames=%d/%d/%d",
-                     "%d chunks" % n if n else "unsolved", total_f, window_f, overlap_f)
-        return io.NodeOutput(int(total_f), int(window_f), int(overlap_f),
-                             int(n or 0), float(window_f) / FPS, report)
+    report = "\n".join(lines)
+    logging.info("[MMH3ChunkSchedule] %s frames=%d/%d/%d",
+                 "%d chunks" % n if n else "unsolved", total_f, window_f, overlap_f)
+    return io.NodeOutput(int(total_f), int(window_f), int(overlap_f),
+                         int(n or 0), float(window_f) / FPS, report)

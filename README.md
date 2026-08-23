@@ -745,6 +745,16 @@ a choice here — now lives in
   groups apart. At 3 chunks that is 2, 17, 32, 47 latents and nothing between — which
   reads as the widget refusing to move until you know why. Asking for MORE chunks
   makes the overlap COARSER, not finer.
+- **MMH3 Chunk Schedule (Frames)** — the same node asked in frames. Identical solver,
+  identical grid rules, identical outputs; it only skips the seconds-to-frames
+  conversion, for when you already hold frame counts and do not want a duration
+  rounded on the way in. The two share one implementation rather than being copies,
+  so they cannot drift.
+
+  It still **snaps**: values land on the nearest `17j+5` and are still solved
+  together. Asking in frames does not mean asking for arbitrary frames — 1445 and
+  1446 both resolve to 1450. Its defaults mirror the seconds node's 60.0s / 20.0s /
+  3.0s exactly (1433 / 481 / 73), so the two agree out of the box.
 - **MMH3 Window Plan** — resolve the whole schedule up front, in frames. How many
   windows you get is how many prompts to write; whether your window and overlap
   survive snapping is otherwise only knowable by running a generation.

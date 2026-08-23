@@ -9,6 +9,39 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.80.0
+
+### Added
+
+- **`MMH3ChunkScheduleFrames` — "MMH3 Chunk Schedule (Frames)", `MMH3Tools/calculators`.**
+  MMH3 Chunk Schedule asked in FRAMES rather than seconds. Requested by a user who
+  already holds frame counts and does not want a duration rounded on the way in.
+
+  The solver already worked entirely in GROUPS — `seconds_to_groups` was the only time
+  conversion anywhere on the input side, and the tiling search, `av_align` and the
+  reachable-overlap ladder are all unit-free. So this needed exactly one new
+  converter, `frames_to_groups`, and nothing else.
+
+  **It still snaps.** Values land on the nearest `17j+5` and are still solved
+  together, so 1445 and 1446 both resolve to 1450. Skipping the time conversion is
+  not the same as accepting arbitrary frames, and the node says so in its
+  description. Defaults (1433 / 481 / 73) mirror the seconds node's 60.0 / 20.0 / 3.0
+  exactly, so the two agree out of the box.
+
+### Changed
+
+- **The two schedule nodes share one implementation.** `execute` was split into a
+  module-level `solve_and_report(c_req, a_req, b_req, prefer, chunks, av_align,
+  asked_line)`; each node converts its own request into groups and supplies its own
+  "asked for" line, and everything after that is common. Copying a 100-line report
+  would have let the two drift, and the drift would be silent — the numbers would
+  still look plausible.
+
+  **`MMH3ChunkSchedule`'s behaviour is unchanged**, verified against a 288-case
+  golden snapshot taken before the refactor (4 lengths x 2 windows x 2 overlaps x 3
+  `prefer` x 2 chunk counts x 3 `av_align`), comparing all five numeric outputs and
+  the full report text: 0 mismatches.
+
 ## [Unreleased] — 0.79.0
 
 ### Added

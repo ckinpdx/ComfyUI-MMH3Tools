@@ -9,6 +9,30 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.78.1
+
+### Fixed
+
+- **`MMH3StreamingSave` no longer needs torchaudio (or TorchCodec) to write audio.**
+  Reported by a user as `TorchCodec is required for save_with_torchcodec. Please
+  install torchcodec to use this function.`
+
+  Since **torchaudio 2.9**, `torchaudio.save` routes through TorchCodec
+  unconditionally. TorchCodec is not a ComfyUI requirement, and where it *is* present
+  its Windows build frequently cannot load its FFmpeg DLLs — a hard failure at the
+  very end of a long render, on machines that have a working ffmpeg binary sitting
+  right there. The node already spawns that binary to write the video, so the audio
+  now goes through the same door: the waveform is written as raw interleaved `f32le`
+  and handed to ffmpeg with `-f f32le -ar <sr> -ac <ch>`.
+
+  No encoder library is involved, so there is nothing for a user to install and
+  nothing to break the next time torchaudio moves its backend. Mono is passed through
+  as `-ac 1` rather than forced to stereo. Verified end to end against ffprobe for
+  both channel counts: correct codec, sample rate, channel count and duration.
+
+  `nodes_align.py` had already been moved off `torchaudio.save` for this exact reason
+  and carried the diagnosis in a comment; this was the call site that was missed.
+
 ## [Unreleased] — 0.78.0
 
 ### Added

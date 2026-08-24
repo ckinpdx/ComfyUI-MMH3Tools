@@ -834,6 +834,36 @@ a choice here — now lives in
   and Windows caps a command line near 32,767 characters. `faststart` is deliberately
   not applied — relocating the moov atom rewrites the whole file and would undo the
   constant-cost decode this node exists for.
+- **MMH3 Reference Attention Probe** / **MMH3 Reference Attention Map** — which
+  reference is each part of the clip actually attending to. H3 has **no
+  cross-attention** (`grep -c cross_attn comfy/ldm/minimax/model.py` → 0): references
+  are packed into the same sequence, so this is a measurement rather than an inference
+  from the output. The spans are not guessed either — `model.py` records the layout as
+  `("ref_audio", rt * 2)` segments, one per reference in order, and the probe captures
+  that list the way Sol-Attn does.
+
+  Wire the probe anywhere in the model chain, render, then read the Map: one row per
+  reference, time along x. It chains any existing attention override, so it coexists
+  with Sol-Attn.
+
+  **It judges per moment, never on the time average.** Under a working binding — one
+  reference leading while speaker A talks, the other while B talks — the two averages
+  come out equal, so an average-based test would call the best possible result "no
+  binding". The report gives the per-moment margin, how many times the lead changes,
+  and what share of the clip each reference leads, which separates the three outcomes:
+  no reference ever leads, one reference leads the entire clip and never hands over,
+  or the lead alternates.
+
+  Queries are pooled to one centroid per 64 rows (sol_attn's own routing granularity,
+  ~5e-4 cosine). The **denominator is exact**, streamed over key chunks inside a
+  memory budget — pooling the keys as well was tried first and is wrong: logsumexp
+  over a key block is near its MAX while a centroid is its MEAN, so a row attending
+  one sharp key elsewhere had its tail understated and both references came back at
+  ~0.50 when the truth was ~0.005.
+
+  **Attention mass is where the model LOOKED, not what it took.** A row can attend a
+  reference heavily and not adopt its timbre, and binding to the WRONG reference looks
+  identical here to binding to the right one.
 - **MMH3 Size Capped Copy** — a second copy of a finished file under a hard size
   ceiling, for upload limits. Chains off Streaming Save's `file_path`; takes any
   video, not just H3 output. `target_mb` is a **ceiling, never a target**: a file

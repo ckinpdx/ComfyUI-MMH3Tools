@@ -9,6 +9,48 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.82.0
+
+### Added
+
+- **`MMH3RefAttentionProbe` / `MMH3RefAttentionMap`, `MMH3Tools/utils`.** Which
+  reference is each part of the clip attending to, as a `[reference × time]` heatmap.
+
+  Possible because H3 has **no cross-attention** — `grep -c cross_attn
+  comfy/ldm/minimax/model.py` returns 0, references sit in the same sequence, so
+  attention onto a reference's key rows is a real quantity. The spans are read, not
+  guessed: `model.py` lays the sequence out as `("ref_audio", rt * 2)` segments, one
+  per reference in order, exposed by `PackedLayout`; the probe captures them by
+  patching `PackedLayout.__init__` and keying on `id(position_ids)`, the same
+  mechanism Sol-Attn uses for its conditioning sink. The attention override chains any
+  existing one, so it runs alongside Sol-Attn.
+
+  **The denominator is exact**, streamed over key chunks inside a memory budget. The
+  first cut pooled non-reference keys into centroids the way sol_attn pools its
+  routed-out tail, and that is wrong for this measurement: logsumexp over a key block
+  is near its MAX while a centroid is its MEAN, so a row attending one sharp key
+  elsewhere in the clip had its tail understated and both references reported ~0.50
+  when the truth was ~0.005. Caught by a synthetic case where the target rows point at
+  each other and both references must read ~0. Only the QUERY side is pooled — one
+  centroid per 64 rows, sol_attn's own routing granularity at ~5e-4 cosine.
+
+  **The report judges per moment, never on the time average.** Under a working binding
+  the two references average out equal, so an average-based test called clean
+  alternation "the signature of no binding" — the exact opposite of the truth. It now
+  reports the per-moment margin, the number of lead changes and each reference's share
+  of the clip, separating: no reference ever leads / one reference leads the whole clip
+  and never hands over / the lead alternates.
+
+  Motivated by `minimax_h3_chatter`, 2026-08-24, where **foxydits** swapped which file
+  went into `<Audio 1>` and `<Audio 2>` and the voices stayed swapped — *"the model
+  has made the decision that no matter what I prompted … THAT SPECIFIC WRONG VOICE is
+  character X's"* — and **ᴊɪɢᴇɴ** independently reported ~90% wrong even when flipping
+  input order and subject definitions.
+
+  **Attention mass is where the model LOOKED, not what it took**, and binding to the
+  wrong reference looks identical to binding to the right one. Verified on synthetic
+  attention only; it has not yet been run against a real render.
+
 ## [Unreleased] — 0.81.0
 
 ### Fixed

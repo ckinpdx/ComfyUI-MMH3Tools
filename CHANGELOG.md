@@ -9,6 +9,33 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.83.0
+
+### Added
+
+- **`WhisperAlignmentToText` — "Whisper to Text (LLM Ready)", `MMH3Tools/audio`.**
+  Adopted into the pack. It previously lived in a loose, unpublished
+  `ComfyUI-WhisperAlignmentToText` folder, which the README listed as a MusicVideo
+  dependency with no link — the only row in that table without one. Somebody asked
+  where to find it in `minimax_h3_resources` on 2026-08-24 and got no answer, because
+  there was nowhere to point them: the MusicVideo workflow could not be run as
+  written by anyone but its author.
+
+  **The node id is unchanged**, so `MMH3_LoopingSampler_MusicVideo.json` keeps working
+  and its stored widgets (`[5, '[M:SS]', 'per_line', False]`) still line up — verified
+  against the new schema's input order. Anyone still carrying the loose folder should
+  delete it, since two packs would otherwise register the same node id.
+
+  Ported behaviour is **identical**, not merely equivalent: checked against the
+  original implementation across 60 random alignments spanning every timestamp format,
+  output format, interval (including 0) and the timing-data toggle — 0 mismatches on
+  all three outputs.
+
+  Its sibling `WhisperAlignmentToSegments` was deliberately **not** adopted. It cuts on
+  25 fps and a 4n+1 frame grid, which is LTX's, not H3's 24 fps / 17j+5; MMH3 Window
+  Plan and Split Audio to Windows already segment on the right grid. It was also
+  unused by every workflow in the repo.
+
 ## [Unreleased] — 0.82.0
 
 ### Added

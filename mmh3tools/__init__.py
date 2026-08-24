@@ -47,6 +47,7 @@ from .nodes_refs import (
     MMH3ReferenceFromLatent,
     MMH3Regenerate2KReference,
 )
+from .nodes_whisper import WhisperAlignmentToText
 from .nodes_windows import (
     MMH3ContextWindows,
     MMH3SplitAudioToWindows,
@@ -75,6 +76,7 @@ NODES = [
     MMH3ContextWindows,
     # MMH3Tools/calculators
     MMH3ChunkSchedule,
+    WhisperAlignmentToText,
     MMH3RefAttentionProbe,
     MMH3RefAttentionMap,
     MMH3ChunkScheduleFrames,

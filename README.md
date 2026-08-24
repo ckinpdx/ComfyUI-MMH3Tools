@@ -156,7 +156,6 @@ Beyond this pack and comfy-core:
 | [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) — `easy forLoopStart` / `forLoopEnd` | the prompt-loop workflows |
 | [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) — Fast Groups Bypasser | MusicVideo, I2V Prompt Building |
 | [ComfyUI-MelBandRoFormer](https://github.com/kijai/ComfyUI-MelBandRoFormer) — vocal separation | MusicVideo only |
-| ComfyUI-WhisperAlignmentToText | MusicVideo only |
 
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention
@@ -834,6 +833,20 @@ a choice here — now lives in
   and Windows caps a command line near 32,767 characters. `faststart` is deliberately
   not applied — relocating the moov atom rewrites the whole file and would undo the
   constant-cost decode this node exists for.
+- **Whisper to Text (LLM Ready)** — flattens ComfyUI-Whisper's per-word
+  `whisper_alignment` into text a prompt writer can read, with timestamp markers so it
+  knows where in the song each line falls. Feed it to the scene-plan nodes as lyrics.
+  Markers land on interval **boundaries** rather than on whichever word crossed one,
+  so the same song always marks at the same times.
+
+  **Adopted into this pack 2026-08-24.** It used to live in a loose
+  `ComfyUI-WhisperAlignmentToText` folder that was never published, so the MusicVideo
+  workflow listed a dependency nobody could install. The node id is unchanged, so
+  existing graphs keep working — if you have that folder, delete it, or two packs will
+  claim the same node. Its sibling `WhisperAlignmentToSegments` was deliberately NOT
+  adopted: it cuts on 25 fps and a 4n+1 frame grid, which is LTX's, not H3's 24 fps /
+  17j+5, and **MMH3 Window Plan** and **Split Audio to Windows** already do that job on
+  the right grid.
 - **MMH3 Reference Attention Probe** / **MMH3 Reference Attention Map** — which
   reference is each part of the clip actually attending to. H3 has **no
   cross-attention** (`grep -c cross_attn comfy/ldm/minimax/model.py` → 0): references

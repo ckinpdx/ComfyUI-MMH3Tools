@@ -9,6 +9,41 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.81.0
+
+### Fixed
+
+- **All audio is normalised to STEREO before it reaches H3's audio VAE.** Traced by
+  **fredbliss** in `minimax_h3_chatter`, 2026-08-22: *"you just do NOT want to pass
+  mono audio encoded into h3 … it does not like that nor expect it. convert to
+  stereo."* and *"sglang also fails on mono audio btw — which makes sense. it needs
+  stereo."*
+
+  Core's `_encode_ref_audio` does `audio_vae.encode(waveform[:1].movedim(1, -1))` with
+  no channel check, so a `[B,1,L]` track encodes without complaining and the model
+  gets something it was not trained on — silent on this side, refused outright by
+  sglang. Plenty of ComfyUI sources are mono: a voice recording, a `LoadAudio` of a
+  mono file, anything a separator emitted as one channel.
+
+  Applied at all three encode sites: `use_input_audio`, a reference video's
+  soundtrack, and each `ref_audios` entry. Mono is duplicated (identical content on
+  both sides, which is what mono means). More than two channels are summed into both
+  sides with a warning that the stereo image is gone — an even/odd split looks more
+  like a real downmix and is worse, since channel 2 in WAV order is CENTRE and
+  dialogue would land on one side only.
+
+### Changed
+
+- **`use_input_audio` trims the waveform to the clip BEFORE encoding it.** It used to
+  encode the whole track and drop the latents past the end: identical result, and a
+  five-minute track for a sixty-second render meant five minutes of VAE encode to
+  keep one. A margin of 8 latents is left on, so the latent-side cut still decides
+  the final length and still lands on the grid.
+
+  Reference audio is deliberately NOT trimmed — a reference is chosen, not derived,
+  so its length is the user's call — but anything over 30 s now reports its cost,
+  since reference tokens are attended at every step of every chunk.
+
 ## [Unreleased] — 0.80.1
 
 ### Changed

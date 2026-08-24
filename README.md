@@ -283,6 +283,21 @@ for any node is in its tooltip.
   Per-prompt memoization means editing one prompt re-encodes only that prompt.
   Swapping a reference invalidates all of them.
 
+  **All audio is normalised to STEREO before it reaches the VAE.** H3's audio VAE
+  expects two channels and core's `_encode_ref_audio` hands the waveform straight to
+  it, so a mono track encodes without complaint and is quietly wrong — sglang refuses
+  the same input outright. Mono is duplicated, anything above stereo is summed into
+  both sides with a warning that the image is gone. Traced by **fredbliss** in
+  `minimax_h3_chatter`, 2026-08-22: *"you just do NOT want to pass mono audio encoded
+  into h3."*
+
+  `use_input_audio` also **trims the waveform to the clip before encoding** rather
+  than encoding the whole track and discarding latents past the end — a five-minute
+  track for a sixty-second render was five minutes of VAE encode to keep one. A small
+  margin is left on, so the latent-side cut still decides the final length.
+  Reference audio is *not* trimmed, since a reference is chosen rather than derived,
+  but anything over 30s is reported: references are attended at every step.
+
 - **MMH3 Cond To Set** — the inverse of Cond Select: wrap an already-encoded
   CONDITIONING as a one-entry cond_set, no text encoder involved. The looping
   sampler requires a cond_set and ignores the guider's conditioning, and every

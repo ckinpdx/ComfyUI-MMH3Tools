@@ -150,7 +150,7 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
         audio_latent, ref_audio_t = (None, 0)
         if soundtrack is not None:
             audio_latent, ref_audio_t = _encode_ref_audio(
-                audio_vae, soundtrack)
+                audio_vae, _to_stereo(soundtrack, "reference video soundtrack"))
             ref_items.append({"type": "audio"})
         sample_idx = list(range(0, frames.shape[0], FPS // 2))
         ref_items.append({"type": "video", "data": frames[sample_idx],
@@ -159,15 +159,95 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
                            "latent_t": z.shape[2], "latent_h": ch // 16, "latent_w": cw // 16,
                            "ref_audio_t": ref_audio_t, "latent": z, "audio_latent": audio_latent})
 
-    for audio in (ref_audios or {}).values():
+    for name, audio in (ref_audios or {}).items():
         if audio is None:
             continue
+        audio = _to_stereo(audio, "reference audio %s" % name)
         audio_latent, ref_audio_t = _encode_ref_audio(audio_vae, audio)
+        # Not trimmed: a reference is chosen, not derived, so its length is the
+        # user's call. It is still worth saying what it costs -- reference tokens
+        # are attended at EVERY step.
+        if ref_audio_t > 40 * 30:
+            logging.warning(
+                "[MMH3ReferenceMultiPrompt] reference audio %s is %.0fs (%d latents). "
+                "References are attended at every step, so long ones are paid for on "
+                "every chunk of every pass.", name, ref_audio_t / 40.0, ref_audio_t)
         ref_items.append({"type": "audio"})
         ref_blocks.append({"kind": "audio", "ref_audio_t": ref_audio_t,
                            "audio_latent": audio_latent})
 
     return ref_items, ref_blocks
+
+
+AUDIO_LATENT_HZ = 40
+
+
+def _to_stereo(audio, label):
+    """H3's audio VAE expects STEREO. Mono is accepted here and quietly wrong.
+
+    Core's `_encode_ref_audio` hands the waveform straight to the VAE, so a [B,1,L]
+    track encodes without complaint and the model gets something it was not trained
+    on; sglang refuses the same input outright. Reported by fredbliss 2026-08-22.
+
+    One channel is duplicated rather than resampled -- the content is identical on
+    both sides, which is what a mono source means. More than two is downmixed to a
+    stereo pair rather than truncated, so a 5.1 upload does not silently lose its
+    centre channel.
+    """
+    wf = audio.get("waveform")
+    if wf is None or wf.ndim != 3:
+        return audio
+    ch = int(wf.shape[1])
+    if ch == 2:
+        return audio
+    if ch == 1:
+        wf = wf.repeat(1, 2, 1)
+        logging.warning(
+            "[MMH3ReferenceMultiPrompt] %s is MONO; duplicated to stereo. H3's audio "
+            "VAE expects two channels and encodes one without complaining, so this "
+            "would have been wrong rather than loud.", label)
+    else:
+        # Every channel into both sides. An even/odd split looks more like a real
+        # downmix and is worse: in WAV order channel 2 is CENTRE, so it would land
+        # in the left channel alone and dialogue would sit off to one side. A proper
+        # 5.1 fold needs per-layout coefficients, which is not worth carrying for an
+        # input this rare -- collapse it, and say so loudly enough to fix upstream.
+        mono = wf.mean(dim=1, keepdim=True)
+        wf = mono.repeat(1, 2, 1)
+        logging.warning(
+            "[MMH3ReferenceMultiPrompt] %s has %d channels; every channel was summed "
+            "into both sides, so the stereo image is GONE. Downmix it yourself if the "
+            "placement matters -- H3's VAE takes stereo only.", label, ch)
+    out = dict(audio)
+    out["waveform"] = wf.contiguous()
+    return out
+
+
+def _trim_audio(audio, want_latents, label):
+    """Cut the waveform to what the clip needs BEFORE encoding it.
+
+    `_use_input_audio` used to encode the whole track and drop the latents past the
+    end. The result was identical and the work was not: a five-minute track for a
+    sixty-second render is five minutes of VAE encode to keep one. A small margin is
+    left on so the trim never decides the final length -- the latent-side cut still
+    does, and it is the one that lands on the grid.
+    """
+    wf = audio.get("waveform")
+    if wf is None or wf.ndim != 3 or want_latents <= 0:
+        return audio
+    sr = int(audio.get("sample_rate") or 0)
+    if sr <= 0:
+        return audio
+    keep = int((want_latents + 8) / float(AUDIO_LATENT_HZ) * sr)   # +8 latents of margin
+    have = int(wf.shape[-1])
+    if have <= keep:
+        return audio
+    out = dict(audio)
+    out["waveform"] = wf[..., :keep].contiguous()
+    logging.info("[MMH3ReferenceMultiPrompt] %s trimmed %.1fs -> %.1fs before encoding "
+                 "(the clip holds %.1fs)", label, have / sr, keep / sr,
+                 want_latents / float(AUDIO_LATENT_HZ))
+    return out
 
 
 def _use_input_audio(latent, audio_vae, audio):
@@ -177,9 +257,12 @@ def _use_input_audio(latent, audio_vae, audio):
     exactly, so it is cut or padded. Padding is silence at the END -- looping a
     short track would put a seam somewhere no prompt describes.
     """
-    z, have = _encode_ref_audio(audio_vae, audio)
     video, empty = latent["samples"].unbind()
     want = int(empty.shape[-1])
+    # stereo first, then trim to the clip: both BEFORE the encode, which is the
+    # whole point -- the old order encoded minutes of audio to keep seconds.
+    audio = _trim_audio(_to_stereo(audio, "input audio"), want, "input audio")
+    z, have = _encode_ref_audio(audio_vae, audio)
     z = z.to(dtype=empty.dtype, device=empty.device)
 
     if have > want:

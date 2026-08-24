@@ -164,6 +164,15 @@ through comfy-kitchen's CUDA kernels — it wants `comfy_kitchen` built with `so
 (bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Nine
 of the ten workflows carry it because it is a speed override, not pipeline logic.
 
+The workflows here are on **v3**, the file linked at the bottom of
+[comfy-kitchen PR #117](https://github.com/Comfy-Org/comfy-kitchen/pull/117). It keeps
+the same `node_id` as v2 but the input list changed, so the two files cannot coexist
+and v2's widget values do not carry over positionally — Kijai's own instruction was to
+remake the node. `tau` now lives under a **`selection`** dynamic combo offering
+`adaptive tau` (tau + `tau_profile`) or `top-k (SLA)` (`keep_percent`, the selection
+lightx2v's SLA turbo LoRAs were distilled against). `routed_cap_percent` is gone.
+These graphs ship on `adaptive tau` at the same 1.3 they used before.
+
 **If you do not have it, delete the node** and wire `ModelAttentionBackend` straight
 through to the LoRA loader. Nothing else in the graph depends on it.
 

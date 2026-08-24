@@ -9,6 +9,34 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.80.1
+
+### Changed
+
+- **All nine workflows carrying `SolAttnMiniMax` moved to the v3 node**, the file
+  linked at the bottom of [comfy-kitchen PR #117](https://github.com/Comfy-Org/comfy-kitchen/pull/117).
+
+  v3 keeps `node_id="SolAttnMiniMax"`, so it cannot coexist with v2 — but the INPUT
+  LIST changed, which is why Kijai's instruction was "old node is dead, need the new
+  file (v3) and remake the node in workflows". `tau` moved under a new `selection`
+  dynamic combo (`adaptive tau` | `top-k (SLA)`), `keep_percent` arrived with it, and
+  `routed_cap_percent` was removed. Widget values serialize positionally, so carrying
+  v2's list across would have put `tau` into `selection` and `start_percent` into
+  `tau`, silently.
+
+  Values were remapped **by name**, not position, and `routed_cap_percent` was 0 in
+  every workflow so nothing was lost. All nine now read
+  `["adaptive tau", 1.3, 0.2, 0.9, 12288, "exact_kv_and_rows", false, "2d_frame",
+  true, false, true, "33-35, 39-42"]` (Upscale keeps its own `verbose`/`dense_blocks`),
+  and the `inputs` array was rebuilt — `selection`, `selection.tau`, and the
+  `selection.tau_profile` socket.
+
+  The DynamicCombo serialization was taken from a real saved graph rather than
+  guessed: core's `SaveAudioAdvanced` stores `['audio/...', 'mp3', 'V0']` — linear, in
+  schema order, only the SELECTED option's nested widgets, namespaced
+  `format.quality`. Verified afterwards against the installed v3 schema: widget order,
+  socket set, value count and model links all check out on all nine, 0 problems.
+
 ## [Unreleased] — 0.80.0
 
 ### Added

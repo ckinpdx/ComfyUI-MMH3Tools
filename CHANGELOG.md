@@ -9,6 +9,32 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.83.1
+
+### Fixed
+
+- **The ref-label wrap works again on post-#15808 cores.** #15808 (merged 2026-08-22)
+  rewrote `MiniMaxH3Tokenizer.tokenize_with_weights` to route text through
+  `self.qwen3vl_32b.tokenize_with_weights(..., disable_weights=True)` and **deleted the
+  private `_text_ids()` helper** the wrap called in three places. Its self-test caught
+  this and declined to install — which is the design working: labels would otherwise
+  have been dropped silently. Now routed through a `_text_entries()` shim that prefers
+  core's current path and falls back to `_text_ids` on older cores, so the wrap tracks
+  future moves instead of hardcoding one shape.
+
+### Changed
+
+- **`MMH3OfficialTokens` is superseded by core.** #15808 adds all seven tokens at
+  tokenizer init. The node already short-circuits when `<d>` is 151669, so on a current
+  ComfyUI it passes the CLIP through with *"already patched, nothing to do"*; it stays
+  for older cores. Verified on `v0.33.0-49`: all seven ids correct, and
+  `<d>[English] hello.</d>` tokenizes to **7 ids** against the 15-with-debris the
+  unpatched tokenizer produced.
+
+  Also of note for anyone reading the README's requirements: #15808 is what makes
+  `embedding:` resolve in H3 prompts at all, since the same rewrite is what routes text
+  through the tokenizer that parses it.
+
 ## [Unreleased] — 0.83.0
 
 ### Added

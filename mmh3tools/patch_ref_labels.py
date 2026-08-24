@@ -76,13 +76,13 @@ def _wrap(orig):
             one = list(packed[key][0])
             # stock numbered this lone item as 1; drop that label and splice in the
             # real number, or the caller's override
-            lead_n = len(self._text_ids(default[kind] % 1))
+            lead_n = len(_text_entries(self, default[kind] % 1))
             label = item.get("label") or (default[kind] % counters[kind])
             if not label.endswith(": "):
                 label += ": "
-            out.extend([(t, 1.0) for t in self._text_ids(label)] + one[lead_n:])
+            out.extend(_text_entries(self, label) + one[lead_n:])
 
-        out.extend((tid, 1.0) for tid in self._text_ids(text))
+        out.extend(_text_entries(self, text))
         if not out:
             out.append((151643, 1.0))
         if return_word_ids:
@@ -118,6 +118,30 @@ def apply():
     return True
 
 
+def _text_entries(tok, s):
+    """A text run as (token, weight) entries, using whatever core currently does.
+
+    Core moved this twice: a private `_text_ids()` returning bare ids, then (#15808)
+    a pass through the inner tokenizer with `disable_weights=True`, which is what
+    also makes `embedding:` resolve. Calling core's own path rather than
+    reimplementing it means this wrap tracks future moves for free -- and when it
+    cannot, the self-test refuses to install rather than dropping labels quietly.
+    """
+    if not s:
+        return []
+    legacy = getattr(tok, "_text_ids", None)
+    if legacy is not None:                       # cores older than #15808
+        return [(t, 1.0) for t in legacy(s)]
+    inner = getattr(tok, "qwen3vl_32b", None)
+    if inner is None:
+        raise AttributeError("MiniMaxH3Tokenizer has neither _text_ids nor qwen3vl_32b")
+    batches = inner.tokenize_with_weights(s, return_word_ids=False,
+                                          disable_weights=True)
+    if len(batches) != 1:
+        raise ValueError("label text spilled into %d batches" % len(batches))
+    return list(batches[0])
+
+
 def _self_test(T, orig, wrapped):
     """Unlabelled items must tokenize IDENTICALLY to stock, labelled ones must differ."""
     try:
@@ -127,7 +151,8 @@ def _self_test(T, orig, wrapped):
             tok.__init__()
         except Exception:
             pass
-        if not hasattr(tok, "_text_ids"):
+        # neither helper present means core moved again; refuse rather than guess
+        if not hasattr(tok, "_text_ids") and not hasattr(tok, "qwen3vl_32b"):
             return False
         def flat(packed):
             return list(packed[next(iter(packed))][0])

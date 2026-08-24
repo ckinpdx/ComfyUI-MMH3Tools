@@ -28,6 +28,7 @@ Everything this pack needed from upstream has now merged:
 |---|---|---|
 | [#15375](https://github.com/Comfy-Org/ComfyUI/pull/15375) per-token masking | 2026-08-18 | `MMH3SeedOverlap`, latent outpaint, and **`MMH3LoopingSampler` with `carry="mask"`** — the default |
 | [#15439](https://github.com/Comfy-Org/ComfyUI/pull/15439) guides at any frame | 2026-08-13 | `MMH3LoopingSampler` with `carry="keyframe"`, and any use of `keyframes` |
+| [#15808](https://github.com/Comfy-Org/ComfyUI/pull/15808) H3's seven special tokens | 2026-08-22 | nothing in the pack — it makes `MMH3OfficialTokens` redundant, see below |
 
 On an older ComfyUI the pack does not pretend. `MMH3SeedOverlap` and the keyframe path
 **refuse to run**, and the looping sampler checks before it starts.
@@ -590,7 +591,13 @@ lyrics against it, slice the alignment by render window, then write prompts.
   is written up in [`docs/music-video.md`](docs/music-video.md).
 
 - **MMH3 Official H3 Tokens** — adds H3's seven special tokens to a CLIP's
-  tokenizer. ComfyUI routes H3 text through the shared `qwen25_tokenizer/`, whose
+  tokenizer. **Superseded by [#15808](https://github.com/Comfy-Org/ComfyUI/pull/15808)
+  (merged 2026-08-22): core now adds all seven at tokenizer init, on their documented
+  ids.** On a current ComfyUI this node detects that and passes the CLIP through
+  untouched — *"already patched, nothing to do"*. It is kept for older cores and does
+  no harm wired in. Verified on `v0.33.0-49`: all seven land correctly and
+  `<d>[English] hello.</d>` is **7 ids** where the unpatched tokenizer produced 15
+  with the marker split across `'<d'`, `'>['` and `'.</'`, `'d'`, `'>'`. ComfyUI routes H3 text through the shared `qwen25_tokenizer/`, whose
   `added_tokens_decoder` stops at **151668**; H3 adds seven ids on top of stock
   Qwen3-VL, and the model card says its own tokenizer config is required. Without
   them `<d>` is not a reserved id — it is ordinary subwords that merge with

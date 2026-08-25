@@ -9,6 +9,22 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.86.1
+
+### Changed
+
+- **The ControlNet workflow now detects its own control passes.** An `AIO_Preprocessor`
+  sits between the video loader and the apply node, defaulting to
+  `DepthAnythingV2Preprocessor` at 768, so raw footage goes in. Its dropdown covers all
+  five conditions the union checkpoint accepts — canny, depth, HED, M-LSD and
+  OpenPose/DWPose — and `none` passes an already-rendered pass straight through.
+
+- **Documentation corrected.** The previous entries said no detector ships and the
+  workflow expects a finished pass, on the strength of a single directory-name check
+  that missed `comfyui_controlnet_aux` entirely. Five preprocessor packs were installed
+  the whole time. The dependency table now names the pack and the node rather than
+  telling people to go find one.
+
 ## [Unreleased] — 0.86.0
 
 ### Added

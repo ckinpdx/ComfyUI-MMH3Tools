@@ -71,8 +71,12 @@ control branch is `control_proj_in` plus 5 `control_blocks`, attaching to layers
 
 Three things about it that are easy to get wrong:
 
-- It takes an **already-detected** control video — canny/depth/pose passes, not raw
-  footage. You need a preprocessor pack; this one does not ship detectors.
+- The checkpoint takes an **already-detected** control video — canny/depth/HED/MLSD/pose
+  passes, not raw footage. The example workflow does that inline with
+  `AIO_Preprocessor` from
+  [comfyui_controlnet_aux](https://github.com/Fannovel16/comfyui_controlnet_aux), so you
+  feed it ordinary video; wire your own detector if you prefer, or set the
+  preprocessor to `none` when the pass is already rendered.
 - The control video must cover the **whole clip**, not one chunk. Windows are cut from
   it by frame index, and a short one clamps to its last frame rather than erroring.
 - It is **guidance-distilled**: run at guidance 1.0 through a `BasicGuider`, not CFG.
@@ -185,9 +189,10 @@ conditioning, where a control video would be fighting a picture that already exi
 Needs [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860) applied (a draft)
 and the union checkpoint from
 [Kijai/MiniMax-H3-experimental](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/controlnet).
-The control video must be **already detected** — canny, depth, HED, MLSD or pose
-passes, not raw footage — and must cover the WHOLE clip, since windows are cut from it
-by frame index. One checkpoint covers all five conditions plus inpainting. It is
+Raw video goes in: an `AIO_Preprocessor` sits between the loader and the apply node,
+defaulting to **DepthAnythingV2** at 768, and its dropdown covers all five conditions
+the checkpoint accepts. Set it to `none` if your pass is already rendered. The video
+must cover the WHOLE clip either way, since windows are cut from it by frame index. One checkpoint covers all five conditions plus inpainting. It is
 **guidance-distilled**, so run it at guidance 1.0 through a BasicGuider rather than CFG.
 
 [`workflows/MMH3_LoopingSampler_MusicVideo.json`](workflows/) — the music-video
@@ -214,13 +219,14 @@ Beyond this pack and comfy-core:
 | [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) — `easy forLoopStart` / `forLoopEnd` | the prompt-loop workflows |
 | [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) — Fast Groups Bypasser | MusicVideo, I2V Prompt Building, I2V ControlNet |
 | [ComfyUI-MelBandRoFormer](https://github.com/kijai/ComfyUI-MelBandRoFormer) — vocal separation | MusicVideo only |
-| a **ControlNet preprocessor** pack — canny / depth / HED / MLSD / pose detectors | I2V ControlNet only |
+| [comfyui_controlnet_aux](https://github.com/Fannovel16/comfyui_controlnet_aux) — `AIO_Preprocessor` | I2V ControlNet only |
 
-**I2V ControlNet needs more than a node pack**: [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860)
-applied to core (a draft), the union checkpoint in `models/controlnet/`, and a
-preprocessor to produce the control passes — the ControlNet takes *detected* video, not
-raw footage. See [Requirements](#requirements). No detector ships here, and the choice
-is yours; the workflow's `VHS_LoadVideo` expects the finished pass.
+**I2V ControlNet needs more than node packs**: [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860)
+applied to core (a draft) and the union checkpoint in `models/controlnet/`. See
+[Requirements](#requirements). The detection itself is handled in the workflow by
+`AIO_Preprocessor`, whose dropdown covers all five conditions the checkpoint accepts —
+`CannyEdgePreprocessor`, `DepthAnythingV2Preprocessor`, `HEDPreprocessor`,
+`M-LSDPreprocessor`, `OpenposePreprocessor`/`DWPreprocessor` — so raw video in is fine.
 
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention

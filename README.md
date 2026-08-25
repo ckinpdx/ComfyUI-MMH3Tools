@@ -20,9 +20,14 @@ the thing to watch.
 
 ## Requirements
 
-**Stock ComfyUI, `v0.33.0-20-gff6c8a8a` or newer.** No patches, no carried diffs.
+**Stock ComfyUI, `v0.33.0-20-gff6c8a8a` or newer.** For everything except the
+ControlNet workflow: no patches, no carried diffs.
 
-Everything this pack needed from upstream has now merged:
+Note that current ComfyUI also raised its own floor to **`av>=17.0.0`**. If you update
+core and ComfyUI then fails to start with `cannot import name 'ColorPrimaries' from
+'av.video.reformatter'`, that is why — `pip install --upgrade "av>=17.0.0"`.
+
+Everything this pack needs from upstream has merged:
 
 | PR | merged | needed by |
 |---|---|---|
@@ -38,6 +43,39 @@ On an older ComfyUI the pack does not pretend. `MMH3SeedOverlap` and the keyfram
 > generation timestep, and you get seams with no error anywhere. If chunks are not
 > carrying, check your ComfyUI version first. `per_row_mask_is_continuous()` reports
 > what the installed core actually does.
+
+### One thing is NOT merged: the Fun ControlNet
+
+**`MMH3CondSetApplyControl` and `MMH3_Looping_I2V_ControlNet.json` need
+[PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860) applied to your ComfyUI.**
+It is kijai's, and it is a **draft** — the only carried diff this pack asks for, and
+the only one that can move under you. Everything else in the pack runs on stock.
+
+```
+git -C /path/to/ComfyUI apply <(curl -sL https://github.com/Comfy-Org/ComfyUI/pull/15860.diff)
+```
+
+Without it the node **refuses with a message** rather than half-working: it checks for
+`MiniMaxH3ControlNet` and for each internal it windows, and says which is missing.
+
+It also needs weights — the union checkpoint, ~2.1 GB, into `models/controlnet/`:
+
+| file | from |
+|---|---|
+| `minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors` | [Kijai/MiniMax-H3-experimental](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/controlnet) |
+
+Prefer `int8_convrot` on torch cu130; there is a `bf16` (3.9 GB) in the same folder.
+One checkpoint covers **Canny, Depth, HED, MLSD, Pose** and video inpainting — the
+control branch is `control_proj_in` plus 5 `control_blocks`, attaching to layers 0, 10,
+20, 30 and 40 of the 50 through zero-gated projections.
+
+Three things about it that are easy to get wrong:
+
+- It takes an **already-detected** control video — canny/depth/pose passes, not raw
+  footage. You need a preprocessor pack; this one does not ship detectors.
+- The control video must cover the **whole clip**, not one chunk. Windows are cut from
+  it by frame index, and a short one clamps to its last frame rather than erroring.
+- It is **guidance-distilled**: run at guidance 1.0 through a `BasicGuider`, not CFG.
 
 What #15375 gives the pack is three things, not one: the mask reaches the model as a
 cond, preserved rows run at the cond timestep, and `MiniMaxH3` gets a
@@ -171,8 +209,15 @@ Beyond this pack and comfy-core:
 | [VideoHelperSuite](https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite) — `VHS_LoadVideo`, `VHS_LoadAudioUpload` | all but Scene Prompt Builder |
 | [ComfyUI-LlamaOmni](https://github.com/ckinpdx/ComfyUI-LlamaOmni) — the prompt-writing nodes | every workflow that builds its own prompts |
 | [ComfyUI-Easy-Use](https://github.com/yolain/ComfyUI-Easy-Use) — `easy forLoopStart` / `forLoopEnd` | the prompt-loop workflows |
-| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) — Fast Groups Bypasser | MusicVideo, I2V Prompt Building |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) — Fast Groups Bypasser | MusicVideo, I2V Prompt Building, I2V ControlNet |
 | [ComfyUI-MelBandRoFormer](https://github.com/kijai/ComfyUI-MelBandRoFormer) — vocal separation | MusicVideo only |
+| a **ControlNet preprocessor** pack — canny / depth / HED / MLSD / pose detectors | I2V ControlNet only |
+
+**I2V ControlNet needs more than a node pack**: [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860)
+applied to core (a draft), the union checkpoint in `models/controlnet/`, and a
+preprocessor to produce the control passes — the ControlNet takes *detected* video, not
+raw footage. See [Requirements](#requirements). No detector ships here, and the choice
+is yours; the workflow's `VHS_LoadVideo` expects the finished pass.
 
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention

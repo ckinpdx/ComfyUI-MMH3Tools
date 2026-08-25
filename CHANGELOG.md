@@ -9,6 +9,28 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.84.2
+
+### Changed — documentation
+
+- **Requirements rewritten for what the pack now actually needs.** The old text said
+  "no patches, no carried diffs", which stopped being true the moment the ControlNet
+  work landed:
+
+  - **PR #15860 is a carried diff, and a DRAFT** — the only one the pack asks for, and
+    the only one that can move underneath you. Called out with the `git apply` line, and
+    scoped: everything except `MMH3CondSetApplyControl` and the ControlNet workflow
+    still runs on stock.
+  - **The union checkpoint** (~2.1 GB int8_convrot, or 3.9 GB bf16) and where it goes.
+  - **A preprocessor pack is required and does not ship here.** The ControlNet takes a
+    DETECTED control video — canny/depth/HED/MLSD/pose — not raw footage. Nothing
+    stated this, and it is the thing most likely to waste someone's afternoon.
+  - **`av>=17.0.0`**, because current core raised its own floor and the failure is
+    `cannot import name 'ColorPrimaries' from 'av.video.reformatter'` at startup, which
+    reads like a broken install rather than a version bump.
+  - The control video must cover the WHOLE clip, and the checkpoint is
+    guidance-distilled — guidance 1.0 through a `BasicGuider`, not CFG.
+
 ## [Unreleased] — 0.84.1
 
 ### Added

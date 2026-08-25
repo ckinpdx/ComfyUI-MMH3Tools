@@ -62,6 +62,12 @@ def _hash_input(h, obj):
     elif isinstance(obj, dict) and "waveform" in obj:
         h.update(str(obj.get("sample_rate")).encode())
         _hash_tensor(h, obj["waveform"])
+    elif isinstance(obj, (list, tuple)):
+        # a reference LIST: hash each entry, since repr() of a tensor list is
+        # truncated and two different sets can share one
+        h.update(b"list:%d" % len(obj))
+        for item in obj:
+            _hash_input(h, item)
     elif hasattr(obj, "shape"):
         _hash_tensor(h, obj)
     else:
@@ -108,12 +114,33 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
     ref_items = []
     ref_blocks = []
 
-    # ref_images is a BATCH: every element is its own <Picture i>, in batch order.
-    # The previous shape took one image per socket and sliced img[:1], so a batch
-    # wired into a slot silently contributed only its first frame.
+    # Every reference is its own <Picture i>, in the order given. Accepts either
+    # form:
+    #   BATCH  [N,H,W,C] -- one tensor, so every image ALREADY shares H,W. Whatever
+    #                       batched them (core's ImageBatch, KJNodes'
+    #                       ImageBatchMulti) resized and centre-cropped them to the
+    #                       first one's frame before this node ran. Nothing here can
+    #                       undo that, so it is reported instead.
+    #   LIST   [t1, t2]  -- each entry keeps its NATIVE size and gets its own
+    #                       aspect-correct target, which is what core's per-socket
+    #                       node does. KJNodes' ImageTensorList emits this.
+    #
+    # Core's node slices img[:1] per socket, so a batch wired into one of its slots
+    # contributes only its first frame; this expands instead.
     if ref_images is not None:
-        for i in range(int(ref_images.shape[0])):
-            img = ref_images[i:i + 1]
+        if isinstance(ref_images, (list, tuple)):
+            frames = [f for f in ref_images if f is not None]
+        else:
+            frames = [ref_images[i:i + 1] for i in range(int(ref_images.shape[0]))]
+            if len(frames) > 1:
+                logging.info(
+                    "[MMH3ReferenceMultiPrompt] %d references arrived as one BATCH, so "
+                    "they all share %dx%d -- whatever batched them conformed the rest "
+                    "to the first. Wire a LIST (KJNodes ImageTensorList) to keep each "
+                    "reference's own size.", len(frames),
+                    int(ref_images.shape[2]), int(ref_images.shape[1]))
+        sizes = []
+        for img in frames:
             h, w = img.shape[1], img.shape[2]
             if ref_image_size == "match":
                 scale = min(1.0, math.sqrt((width * height) / (w * h)))
@@ -126,6 +153,10 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
             ref_items.append({"type": "image", "data": resized})
             ref_blocks.append({"kind": "image", "latent_h": th // 16,
                                "latent_w": tw // 16, "latent": z})
+            sizes.append("%dx%d->%dx%d" % (w, h, tw, th))
+        if sizes:
+            logging.info("[MMH3ReferenceMultiPrompt] <Picture 1..%d>: %s",
+                         len(sizes), "  ".join(sizes))
 
     ref_video_audios = ref_video_audios or {}
     for name, video_frames in (ref_videos or {}).items():
@@ -331,9 +362,19 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                 ),
                 io.Image.Input(
                     "ref_images", optional=True,
-                    tooltip="A BATCH of reference stills -- each one becomes its own "
-                            "<Picture i>, numbered in batch order. One image is the "
-                            "ordinary case.",
+                    tooltip="Reference stills -- each becomes its own <Picture i>, "
+                            "numbered in the order given. One image is the ordinary "
+                            "case.\n\n"
+                            "A BATCH forces every image to share one frame: a tensor "
+                            "cannot be ragged, so core's ImageBatch and KJNodes' "
+                            "ImageBatchMulti both resize and CENTRE-CROP everything to "
+                            "the first image before this node sees it. If your "
+                            "references are different shapes, that crop already "
+                            "happened and nothing here can undo it.\n\n"
+                            "Wire a LIST instead to keep each reference at its native "
+                            "size, each getting its own aspect-correct target -- "
+                            "KJNodes' ImageTensorList emits one and chains to any "
+                            "depth.",
                 ),
                 io.Autogrow.Input(
                     "ref_videos", optional=True,

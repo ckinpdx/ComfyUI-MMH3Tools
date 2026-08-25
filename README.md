@@ -344,6 +344,16 @@ for any node is in its tooltip.
   Per-prompt memoization means editing one prompt re-encodes only that prompt.
   Swapping a reference invalidates all of them.
 
+  **`ref_images` takes a batch OR a list, and the difference is not cosmetic.** A batch
+  is one tensor and a tensor cannot be ragged, so every batching node — core's
+  `ImageBatch`, KJNodes' `ImageBatchMulti` — resizes and **centre-crops** every image to
+  the first one's frame before this node runs. References of different shapes are
+  already cropped by then and nothing here can undo it. Wire a **list** instead
+  (KJNodes' `ImageTensorList`, chainable to any depth) and each reference keeps its
+  native size and gets its own aspect-correct target, which is what core's per-socket
+  node does. Either way the node logs each reference's incoming and resolved size, and
+  says so when a multi-image batch arrives.
+
   **All audio is normalised to STEREO before it reaches the VAE.** H3's audio VAE
   expects two channels and core's `_encode_ref_audio` hands the waveform straight to
   it, so a mono track encodes without complaint and is quietly wrong — sglang refuses

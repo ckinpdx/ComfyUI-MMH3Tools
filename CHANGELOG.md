@@ -9,6 +9,38 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.85.0
+
+### Added
+
+- **`MMH3ReferenceMultiPrompt.ref_images` accepts a LIST as well as a batch**, so
+  references of different shapes keep their own geometry.
+
+  A batch is one tensor and a tensor cannot be ragged, so every batching node conforms
+  its inputs first — core's `ImageBatch` and KJNodes' `ImageBatchMulti` both run
+  `common_upscale(..., "center")` against image 1's height and width. References that
+  were not already the same shape arrived here **resized and centre-cropped**, and the
+  per-image sizing in this node then correctly sized the damage. Nothing downstream can
+  detect it, because by then every image genuinely does share one frame.
+
+  KJNodes' `ImageTensorList` returns a Python list typed IMAGE and chains to any depth;
+  `_build_refs` now iterates either form. Each list entry gets its own aspect-preserving
+  `tw x th`, which is what core's per-socket node does. Verified: portrait 576x1024,
+  wide 960x540 and square 800x800 through a list come out at three distinct aspect
+  ratios; the same three through a batch come out identical.
+
+  `None` entries in a list are skipped rather than raising. The conditioning
+  fingerprint hashes a list entry by entry — `repr()` of a tensor list is truncated, so
+  two different reference sets could otherwise share a cache key — and reference ORDER
+  changes the fingerprint, because it changes which image is `<Picture 1>`.
+
+### Changed
+
+- **The node reports what each reference actually became**, e.g.
+  `<Picture 1..3>: 576x1024->576x1024  960x540->960x544  800x800->800x800`, and says so
+  explicitly when more than one reference arrives as a batch — the one case where the
+  damage happened upstream and cannot be reported any other way.
+
 ## [Unreleased] — 0.84.2
 
 ### Changed — documentation

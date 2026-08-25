@@ -9,6 +9,23 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.84.1
+
+### Added
+
+- **`workflows/MMH3_Looping_I2V_ControlNet.json`.** The ManualPrompt graph with a Fun
+  ControlNet on the generate pass — copied rather than authored, so the sampler ladder,
+  schedule, upscale passes and save chain are untouched. `ControlNetLoader` + a control
+  video feed `MMH3CondSetApplyControl`, which sits between the multiprompt node's
+  `cond_set` and sampler 269.
+
+  The two refine samplers are deliberately NOT given the control: they run at low
+  denoise off zeroed conditioning, where a control video would be fighting a picture
+  that already exists.
+
+  Vetted like the others: 0 link errors, no dead sockets, widget order checked against
+  the node's schema.
+
 ## [Unreleased] — 0.84.0
 
 ### Added

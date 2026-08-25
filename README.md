@@ -136,6 +136,22 @@ Ladder** picks. The last pass splits the pair and pins the audio under a **zero*
 came out of stage one survives both passes untouched. Finishes on a streaming save
 plus a size-capped copy.
 
+[`workflows/MMH3_Looping_I2V_ControlNet.json`](workflows/) — the ManualPrompt graph
+with a **Fun ControlNet** driving the generate pass. A `ControlNetLoader` and a control
+video feed **MMH3 Cond Set Apply ControlNet**, which sits between the multiprompt node
+and the sampler's `cond_set`, so every chunk gets the control windowed to its own span.
+
+The two refine passes are deliberately left alone: they run at low denoise off zeroed
+conditioning, where a control video would be fighting a picture that already exists.
+
+Needs [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860) applied (a draft)
+and the union checkpoint from
+[Kijai/MiniMax-H3-experimental](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/controlnet).
+The control video must be **already detected** — canny, depth, HED, MLSD or pose
+passes, not raw footage — and must cover the WHOLE clip, since windows are cut from it
+by frame index. One checkpoint covers all five conditions plus inpainting. It is
+**guidance-distilled**, so run it at guidance 1.0 through a BasicGuider rather than CFG.
+
 [`workflows/MMH3_LoopingSampler_MusicVideo.json`](workflows/) — the music-video
 variant: windows are locked to musical beats and lyrics mapped per window, feeding the
 looping sampler; full-res and size-capped saves.
@@ -161,8 +177,8 @@ Beyond this pack and comfy-core:
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention
 through comfy-kitchen's CUDA kernels — it wants `comfy_kitchen` built with `sol_attn`
-(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Nine
-of the ten workflows carry it because it is a speed override, not pipeline logic.
+(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Ten
+of the eleven workflows carry it because it is a speed override, not pipeline logic.
 
 The workflows here are on **v3**, the file linked at the bottom of
 [comfy-kitchen PR #117](https://github.com/Comfy-Org/comfy-kitchen/pull/117). It keeps

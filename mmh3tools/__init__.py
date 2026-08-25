@@ -1,5 +1,6 @@
 from . import patch_guide_origin as _patch_guide_origin
 from . import patch_ref_labels as _patch_ref_labels
+from .nodes_imagelist import MMH3ImageList
 from .nodes_loop import MMH3SeedOverlap, MMH3ConcatAV, MMH3FindDivergence, MMH3JoinAV, MMH3PackAV
 from .nodes_align import MMH3ForcedAlign
 from .nodes_lyricwindows import MMH3LyricsToWindows
@@ -77,6 +78,7 @@ NODES = [
     MMH3ContextWindows,
     # MMH3Tools/calculators
     MMH3ChunkSchedule,
+    MMH3ImageList,
     MMH3CondSetApplyControl,
     WhisperAlignmentToText,
     MMH3RefAttentionProbe,

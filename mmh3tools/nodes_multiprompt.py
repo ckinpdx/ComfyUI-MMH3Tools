@@ -168,7 +168,18 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
     # contributes only its first frame; this expands instead.
     if ref_images is not None:
         if isinstance(ref_images, (list, tuple)):
-            frames = [f for f in ref_images if f is not None]
+            # A list entry may itself hold several frames -- one socket fed from a
+            # LoadImage of a multi-page file, say. Expand those too, so N frames is
+            # N references however they arrived. Entries keep their own size either
+            # way; only entries batched TOGETHER were ever conformed.
+            frames = []
+            for f in ref_images:
+                if f is None:
+                    continue
+                if hasattr(f, "shape") and f.ndim == 4 and int(f.shape[0]) > 1:
+                    frames.extend(f[i:i + 1] for i in range(int(f.shape[0])))
+                else:
+                    frames.append(f)
         else:
             frames = [ref_images[i:i + 1] for i in range(int(ref_images.shape[0]))]
             if len(frames) > 1:

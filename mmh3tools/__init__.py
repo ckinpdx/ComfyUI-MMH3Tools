@@ -8,6 +8,7 @@ from .nodes_schedule import MMH3ChunkSchedule, MMH3ChunkScheduleFrames
 from .nodes_music_analysis import MMH3MusicAnalysis
 from .nodes_musicscene import MMH3MusicScenePlanPrompt
 from .nodes_stylepack import MMH3LoadSkill
+from .nodes_controlnet import MMH3CondSetApplyControl
 from .nodes_encode import MMH3StreamingEncode
 from .nodes_lint import MMH3PromptLint
 from .nodes_music import (MMH3LyricsSectionize, MMH3MusicCaptionSplit,
@@ -76,6 +77,7 @@ NODES = [
     MMH3ContextWindows,
     # MMH3Tools/calculators
     MMH3ChunkSchedule,
+    MMH3CondSetApplyControl,
     WhisperAlignmentToText,
     MMH3RefAttentionProbe,
     MMH3RefAttentionMap,

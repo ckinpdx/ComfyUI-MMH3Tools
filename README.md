@@ -298,6 +298,34 @@ for any node is in its tooltip.
   Reference audio is *not* trimmed, since a reference is chosen rather than derived,
   but anything over 30s is reported: references are attended at every step.
 
+- **MMH3 Cond Set Apply ControlNet** — applies a MiniMax H3 **Fun ControlNet** to
+  every prompt in a cond set, so a chunked render can use one. Core's apply node takes
+  a single CONDITIONING and this pack's sampler takes a cond set, so the two do not
+  meet without it.
+
+  It also makes the control **chunk-aware**, which is the part that matters. Core's
+  `get_control` picks hint frames with `torch.arange(pixel_t)` — from zero, three
+  times over (control video, inpaint mask, source video) — and caches the encode keyed
+  on `cond_hint.shape[2:]`. Every chunk shares a shape, so unwrapped, **all of them are
+  driven by the control video's opening frames** and chunk 0's encode is reused
+  throughout, with no error anywhere. The wrapper slices those three inputs to the
+  chunk's own span before delegating, so core's arange-from-zero is right because zero
+  is now the chunk's first frame. The offset comes from the sampler as
+  `transformer_options['mmh3_control_frame0']`, computed with `frame_at_latent` — not
+  `latents_to_frames`, which is only meaningful on the 5j+2 grid and answers -12 for
+  index 1.
+
+  Unset or 0 is a clean pass-through, which is exactly right for a whole-clip pass
+  through a stock sampler. The control video must cover the **whole clip**, not one
+  chunk: windows are cut from it by frame index, and a short one clamps to its last
+  frame rather than erroring.
+
+  > ⚠️ Built against [**PR #15860**](https://github.com/Comfy-Org/ComfyUI/pull/15860),
+  > which is a **draft** — you need it applied to your ComfyUI. The node windows core's
+  > internals (`cond_hint_original`, `inpaint_video`, `inpaint_mask`, `cond_hint`) and
+  > **refuses with a message** if any of them is renamed, rather than mis-windowing
+  > quietly.
+
 - **MMH3 Cond To Set** — the inverse of Cond Select: wrap an already-encoded
   CONDITIONING as a one-entry cond_set, no text encoder involved. The looping
   sampler requires a cond_set and ignores the guider's conditioning, and every

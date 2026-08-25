@@ -9,6 +9,46 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.84.0
+
+### Added
+
+- **`MMH3CondSetApplyControl` — "MMH3 Cond Set Apply ControlNet",
+  `MMH3Tools/conditioning`.** Applies a MiniMax H3 Fun ControlNet across a cond set,
+  and makes it chunk-aware.
+
+  Two problems, one node. Core's apply node is `CONDITIONING -> CONDITIONING` while
+  this pack's sampler takes a cond set, so they never meet — that part is plumbing,
+  and core's shaping logic is called per cond rather than duplicated.
+
+  The other is a silent-wrong. `MiniMaxH3ControlNet.get_control` selects hint frames
+  with `torch.arange(pixel_t)` from ZERO in three places (control video, inpaint mask,
+  source video) and invalidates its cache on `cond_hint.shape[2:]` alone. Both are
+  correct for one whole-clip pass. Under chunking every chunk shares a shape, so chunk
+  0's encode is reused for all of them and every chunk is driven by the control video's
+  OPENING frames — plausible output, no error.
+
+  Rather than reimplementing `get_control` or overriding `_fit_frames` — which would
+  catch the control video and source but miss the mask, whose `arange` is inline — the
+  wrapper hands core a WINDOW: the three inputs are sliced to the chunk's span before
+  delegating, so arange-from-zero is right because zero is now the chunk's first frame.
+  The cache is also invalidated whenever the offset moves.
+
+- **`MMH3LoopingSampler` publishes `transformer_options['mmh3_control_frame0']`** per
+  chunk, on both the main and phase-2 guiders. Computed with `frame_at_latent(v0)`, not
+  `latents_to_frames` — window bounds are arbitrary latent indices and
+  `latents_to_frames` is only meaningful on the 5j+2 grid, where it answers -12 for
+  index 1. `model_options` and its `transformer_options` are rebound per chunk rather
+  than mutated, since `copy.copy(guider)` shares them — the same shallow-copy trap this
+  file already documents for `original_conds`.
+
+  Verified: chunks at latent 0 / 14 / 28 see control frames starting at 0 / 47 / 94,
+  each re-encoded, and an absent or zero offset passes through unwindowed.
+
+  > Built against [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860), a
+  > **draft**. The node checks for each internal it windows and refuses with a message
+  > if core renames one.
+
 ## [Unreleased] — 0.83.1
 
 ### Fixed

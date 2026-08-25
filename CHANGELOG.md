@@ -9,6 +9,24 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.86.2
+
+### Added
+
+- **`workflows/MMH3_Looping_RefVideo_Chunked.json`.** ManualPrompt — the simplest graph
+  — wired for a windowed video reference, so `window_ref_video` has a worked example.
+
+  A `VHS_LoadVideo` feeds both `ref_videos.ref_video_0` and
+  `ref_video_audios.ref_video_audio_0`, and `chunk_frames` / `overlap_frames` are
+  link-driven from the **same MMH3 Chunk Schedule outputs the sampler reads** rather
+  than typed. That is the part that matters: typed separately they drift, and the
+  reference windows silently stop being the spans the chunks render.
+
+  The `ref_images` still is left wired and unwindowed — `<Picture 1>` for identity,
+  `<Video 1>` for the windowed motion — with a Note saying so and giving the cost
+  arithmetic. Verified the node's widget order matches the schema exactly after
+  extending `widgets_values` from 7 to 10.
+
 ## [Unreleased] — 0.86.1
 
 ### Changed

@@ -178,6 +178,19 @@ Ladder** picks. The last pass splits the pair and pins the audio under a **zero*
 came out of stage one survives both passes untouched. Finishes on a streaming save
 plus a size-capped copy.
 
+[`workflows/MMH3_Looping_RefVideo_Chunked.json`](workflows/) — ManualPrompt driven by a
+**windowed video reference**. `window_ref_video` is on, and `chunk_frames` /
+`overlap_frames` come from the **same MMH3 Chunk Schedule the sampler reads**, so
+reference window *i* is by construction the span chunk *i* renders. The loader's audio
+goes to `ref_video_audios` alongside, cut on the same clock.
+
+Do not type those two numbers here. If they drift from the sampler's, the windows stop
+matching the chunks and every chunk conditions on somebody else's footage — no error,
+plausible output.
+
+The still on `ref_images` is left wired and stays whole: `<Picture 1>` for identity,
+`<Video 1>` for the windowed motion. Unwire it for a pure video reference.
+
 [`workflows/MMH3_Looping_I2V_ControlNet.json`](workflows/) — the ManualPrompt graph
 with a **Fun ControlNet** driving the generate pass. A `ControlNetLoader` and a control
 video feed **MMH3 Cond Set Apply ControlNet**, which sits between the multiprompt node
@@ -231,8 +244,8 @@ applied to core (a draft) and the union checkpoint in `models/controlnet/`. See
 **`SolAttnMiniMax` is Kijai's single-file Sol-Attn node**
 ([arXiv 2607.24027](https://arxiv.org/abs/2607.24027)), which reaches H3's attention
 through comfy-kitchen's CUDA kernels — it wants `comfy_kitchen` built with `sol_attn`
-(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Ten
-of the eleven workflows carry it because it is a speed override, not pipeline logic.
+(bf16, head_dim 128, sm_80+) and otherwise falls back to the existing backend. Eleven
+of the twelve workflows carry it because it is a speed override, not pipeline logic.
 
 The workflows here are on **v3**, the file linked at the bottom of
 [comfy-kitchen PR #117](https://github.com/Comfy-Org/comfy-kitchen/pull/117). It keeps

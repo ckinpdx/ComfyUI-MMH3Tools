@@ -9,6 +9,32 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.87.0
+
+### Added
+
+- **`MMH3ImageList` — "MMH3 Image List", `MMH3Tools/reference`.** An Autogrow of image
+  sockets (1–50) emitting a LIST, so many references can be collected without any being
+  conformed to one frame.
+
+  KJNodes' `ImageTensorList` is the only other node in reach that returns a list, and it
+  takes exactly two inputs — N references meant N-1 chained nodes. Every `inputcount`
+  node in KJNodes ends in `torch.cat`, which is the conforming being avoided.
+
+  Socket order is `<Picture i>` order. Empty sockets are skipped so gaps are fine, and a
+  socket holding a multi-frame batch expands to one reference per frame. The report
+  names every reference's dimensions, says how many distinct shapes survived and what
+  batching would have cropped them to, and warns past 9 that references are attended at
+  every sampling step.
+
+### Fixed
+
+- **`_build_refs` expands multi-frame entries inside a list.** A list entry holding
+  several frames encoded as ONE reference while `MMH3ImageList` counted it as several,
+  so the node's reported count and the references actually built disagreed. Now N frames
+  is N references however they arrived — verified the two agree at 5 and 5 for a
+  4-frame batch plus a still.
+
 ## [Unreleased] — 0.86.2
 
 ### Added

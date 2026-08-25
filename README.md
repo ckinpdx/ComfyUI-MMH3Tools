@@ -370,10 +370,11 @@ for any node is in its tooltip.
   is one tensor and a tensor cannot be ragged, so every batching node — core's
   `ImageBatch`, KJNodes' `ImageBatchMulti` — resizes and **centre-crops** every image to
   the first one's frame before this node runs. References of different shapes are
-  already cropped by then and nothing here can undo it. Wire a **list** instead
-  (KJNodes' `ImageTensorList`, chainable to any depth) and each reference keeps its
-  native size and gets its own aspect-correct target, which is what core's per-socket
-  node does. Either way the node logs each reference's incoming and resolved size, and
+  already cropped by then and nothing here can undo it. Wire a **list** instead — use
+  **MMH3 Image List**, an Autogrow of image sockets (up to 50) that emits one — and each
+  reference keeps its native size and gets its own aspect-correct target, which is what
+  core's per-socket node does. KJNodes' `ImageTensorList` also emits a list but takes
+  exactly two inputs, so N references need N-1 chained nodes. Either way the node logs each reference's incoming and resolved size, and
   says so when a multi-image batch arrives.
 
   **`window_ref_video` cuts the reference video to each chunk's own span.** Off by
@@ -411,6 +412,21 @@ for any node is in its tooltip.
   margin is left on, so the latent-side cut still decides the final length.
   Reference audio is *not* trimmed, since a reference is chosen rather than derived,
   but anything over 30s is reported: references are attended at every step.
+
+- **MMH3 Image List** — collect many reference images into a LIST rather than a batch,
+  one Autogrow socket each, up to 50. Feed it to **MMH3 Reference (Multi-Prompt)**'s
+  `ref_images`.
+
+  Batching cannot preserve differing shapes — a tensor cannot be ragged, so core's
+  `BatchImagesNode` and KJNodes' `ImageBatchMulti` both centre-crop everything to the
+  first image, and by the time it reaches the reference node the crop is undetectable.
+  Socket order is `<Picture i>` order; empty sockets are skipped, so gaps are fine; a
+  socket holding a multi-frame batch expands to one `<Picture>` per frame.
+
+  The report names every reference's dimensions, says how many distinct shapes survived
+  and what batching would have cropped them to, and warns past 9 references — they are
+  attended at **every** sampling step, so the cost lands on every chunk of every pass.
+  (9 is the hosted API's cap, not the model's.)
 
 - **MMH3 Cond Set Apply ControlNet** — applies a MiniMax H3 **Fun ControlNet** to
   every prompt in a cond set, so a chunked render can use one. Core's apply node takes

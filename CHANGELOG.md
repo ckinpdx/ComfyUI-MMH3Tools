@@ -9,6 +9,24 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.85.1
+
+### Fixed
+
+- **`MMH3_LoopingSampler_MusicVideo.json` carries its references as a LIST.** It was
+  the only workflow in the repo batching them — core's `BatchImagesNode`, whose helper
+  says outright `# resize all images to be the same size as the first image` and runs
+  `common_upscale(..., "center")`.
+
+  All three loaders are `resize: False`, so the images arrive at native size, and two of
+  the three are `_crop.png`. So references 2 and 3 were being resized and centre-cropped
+  to reference 1's frame on every render this workflow has ever done. Replaced with two
+  chained `ImageTensorList` nodes, order preserved, so `<Picture 1..3>` still map to the
+  same loaders.
+
+  The other ten workflows were checked and need no change: seven wire a single
+  `LoadImage` / `LoadAndResizeImage`, and four leave `ref_images` unwired.
+
 ## [Unreleased] — 0.85.0
 
 ### Added

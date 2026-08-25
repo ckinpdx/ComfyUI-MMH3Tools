@@ -192,7 +192,10 @@ by frame index. One checkpoint covers all five conditions plus inpainting. It is
 
 [`workflows/MMH3_LoopingSampler_MusicVideo.json`](workflows/) — the music-video
 variant: windows are locked to musical beats and lyrics mapped per window, feeding the
-looping sampler; full-res and size-capped saves.
+looping sampler; full-res and size-capped saves. Its three character references are
+carried by a chained **`ImageTensorList`** rather than a batch, so each keeps its own
+size — the loaders are `resize: False` and two of the three are crops, so batching was
+conforming references 2 and 3 to reference 1's frame.
 
 [`workflows/MMH3_LoopingSampler_Regenerate2K.json`](workflows/) — the Regenerate-2K
 path: a looping 2K pass over an existing render, driven by the dedicated **MMH3

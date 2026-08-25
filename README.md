@@ -215,6 +215,15 @@ carried by a chained **`ImageTensorList`** rather than a batch, so each keeps it
 size — the loaders are `resize: False` and two of the three are crops, so batching was
 conforming references 2 and 3 to reference 1's frame.
 
+Its prompts are written by **one** local model across three staged calls — definitions,
+then beats, then shots — each with its own `Llama Connectivity` and `Llama Options`.
+The graph ships pointing at `qwen3.6-fable-27b-uncensored-vision`, which is a
+llama-swap id: swap it for yours. The load is split across three calls deliberately
+rather than asking one call to produce every prompt at once, which is also what makes a
+smaller model viable — a community report has **Qwen3-VL-4B-Instruct-Q8_0** working
+through the same three stages. Contrast **Scene Prompt Builder**, which uses two
+different models on purpose.
+
 [`workflows/MMH3_LoopingSampler_Regenerate2K.json`](workflows/) — the Regenerate-2K
 path: a looping 2K pass over an existing render, driven by the dedicated **MMH3
 Regenerate 2K Dims** / **Reference** nodes.

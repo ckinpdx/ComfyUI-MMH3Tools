@@ -9,6 +9,22 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.87.1
+
+### Changed — documentation
+
+- **The MusicVideo entry now names its prompt-writing model.** It said only that the
+  `Llama Connectivity` ids are local llama-swap names to swap for your own, and never
+  which one the graph ships with — someone had to ask in `minimax_h3_resources`.
+
+  Now records that it is **one** model across three staged calls (definitions, beats,
+  shots), shipping as `qwen3.6-fable-27b-uncensored-vision`; that splitting the load
+  across three calls rather than one is deliberate; and that a community report has
+  **Qwen3-VL-4B-Instruct-Q8_0** working through the same three stages — worth stating,
+  since a 27B is out of reach for many and the staged shape is what makes a small model
+  viable. Also points at Scene Prompt Builder as the workflow that uses two *different*
+  models on purpose (`gemma-4-12b-vision` for definitions, fable-27b for the rest).
+
 ## [Unreleased] — 0.87.0
 
 ### Added

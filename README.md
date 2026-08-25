@@ -407,6 +407,24 @@ for any node is in its tooltip.
   Timestamps restart at 0 within each window, which is what the model sees at
   generation time.
 
+  **`embeddings` prepends H3 text embeddings to every chunk's prompt.** One filename
+  per line from `models/embeddings/`; a bare name goes on every chunk, `name: N` or
+  `name: A-B` (1-based) schedules it, which works because each chunk has its own prompt
+  anyway. Several lines stack, and their cost is exactly additive — measured, a plain
+  prompt splices 0 vectors, `bullet_time` splices 94 (its exact row count), and
+  `bullet_time` + `storm_magic` splices 231 = 94 + 137.
+
+  These are DiffSynth-Studio's *Diffusion Templates* — textual inversion for H3, a
+  lightweight alternative to LoRA on a 33B DiT. They are **not free**: 50–142 token
+  slots each, attended at **every** sampling step of every chunk, and the node's log
+  prints the per-chunk total so the bill is visible before you pay it.
+
+  It **refuses** on a core that does not splice `embedding:` in H3 prompts. Before
+  [#15808](https://github.com/Comfy-Org/ComfyUI/pull/15808) (merged 2026-08-22) the H3
+  tokenizer never looked for the marker and it went through as ordinary words — no
+  error, no embedding. Probed for real behaviour rather than a version number, and a
+  name with no matching file stops the run rather than being dropped with a log line.
+
   **All audio is normalised to STEREO before it reaches the VAE.** H3's audio VAE
   expects two channels and core's `_encode_ref_audio` hands the waveform straight to
   it, so a mono track encodes without complaint and is quietly wrong — sglang refuses

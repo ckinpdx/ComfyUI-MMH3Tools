@@ -100,6 +100,91 @@ def _fingerprint(ref_blocks, raw_inputs, width, height, length, ref_image_size):
     return h.hexdigest()
 
 
+def _embedding_rows(name):
+    """How many token slots this embedding occupies, from the file header alone."""
+    try:
+        import folder_paths
+        from safetensors import safe_open
+        path = folder_paths.get_full_path("embeddings", name)
+        if path is None:
+            for ext in (".safetensors", ".pt", ".bin"):
+                path = folder_paths.get_full_path("embeddings", name + ext)
+                if path is not None:
+                    break
+        if path is None or not str(path).endswith(".safetensors"):
+            return None
+        with safe_open(path, "pt") as f:
+            for k in f.keys():
+                shape = f.get_slice(k).get_shape()
+                return int(shape[0]) if len(shape) == 2 else None
+    except Exception:
+        return None
+    return None
+
+
+def _known_embeddings():
+    try:
+        import folder_paths
+        return set(folder_paths.get_filename_list("embeddings"))
+    except Exception:
+        return set()
+
+
+def _parse_embeddings(spec, n_chunks):
+    """Lines of `name` or `name: all|N|A-B` -> the names each chunk should carry.
+
+    A bare name means EVERY chunk, which is the ordinary case: one look applied to
+    the whole piece. The range form exists because prompts are per chunk anyway, so
+    scheduling an effect is only a question of which prompts get the token.
+    Indices are 1-based, matching how the chunks are talked about everywhere else.
+    """
+    per = [[] for _ in range(max(0, n_chunks))]
+    for raw in (spec or "").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # strip the marker BEFORE splitting: partition() takes the FIRST colon, so
+        # `embedding:name: all` would otherwise parse as name="embedding"
+        if line.startswith("embedding:"):
+            line = line[len("embedding:"):].strip()
+        name, _, rng = line.partition(":")
+        name = name.strip()
+        if not name:
+            continue
+        rng = rng.strip().lower()
+        if not rng or rng == "all":
+            idx = range(n_chunks)
+        elif "-" in rng:
+            a, _, b = rng.partition("-")
+            idx = range(max(0, int(a) - 1), min(n_chunks, int(b)))
+        else:
+            k = int(rng) - 1
+            idx = [k] if 0 <= k < n_chunks else []
+        for i in idx:
+            if name not in per[i]:
+                per[i].append(name)
+    return per
+
+
+def _embeddings_resolve(clip, name):
+    """Does THIS core actually splice `embedding:` in an H3 prompt?
+
+    Before #15808 the H3 tokenizer never looked for the marker and the words went
+    through as ordinary text -- no error, no embedding. Probed rather than inferred
+    from a version, because the failure is invisible in the output.
+    """
+    try:
+        out = clip.tokenize("embedding:%s" % name)
+        for entries in out.values():
+            for batch in entries:
+                for tok, *_rest in batch:
+                    if hasattr(tok, "shape"):
+                        return True
+    except Exception:
+        return False
+    return False
+
+
 def _window_media(frames, soundtrack, span, fps=FPS):
     """A reference video and its audio cut to `span` = (first_frame, last_frame).
 
@@ -489,6 +574,25 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                     "overlap_frames", default=0, min=0, max=100000, step=1, optional=True,
                     tooltip="Only read when `window_ref_video` is on. Wire the sampler's "
                             "own `overlap_frames`."),
+                io.String.Input(
+                    "embeddings", default="", multiline=True, optional=True,
+                    tooltip="H3 text embeddings to PREPEND to every chunk's prompt, one "
+                            "per line, by filename from `models/embeddings/` (the "
+                            "extension is optional).\n\n"
+                            "    minimaxh3_bullet_time\n"
+                            "    minimaxh3_storm_magic: 4-6\n"
+                            "    minimaxh3_four_seasons: all\n\n"
+                            "A bare name goes on EVERY chunk. `N` or `A-B` (1-based) "
+                            "schedules it, which works because each chunk has its own "
+                            "prompt anyway. Several lines stack: their cost is exactly "
+                            "additive, and so is their effect.\n\n"
+                            "They are NOT free -- 50 to 142 token slots each, attended "
+                            "at every sampling step of every chunk. The report prints "
+                            "the per-chunk total.\n\n"
+                            "Needs a core that parses `embedding:` in H3 prompts "
+                            "(#15808, merged 2026-08-22). On an older one the marker "
+                            "tokenizes as ordinary words and nothing is spliced, so "
+                            "this refuses rather than pretending."),
             ],
             outputs=[
                 MMH3CondSet.Output(display_name="cond_set"),
@@ -502,7 +606,7 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                 prompts=None, ref_images=None, ref_videos=None, ref_video_audios=None,
                 ref_audios=None, audio=None, use_input_audio=False,
                 window_ref_video=False, chunk_frames=0, overlap_frames=0,
-                unload_text_encoder=True) -> io.NodeOutput:
+                embeddings="", unload_text_encoder=True) -> io.NodeOutput:
         latent, frame_count = _empty_av_latent(width, height, length)
         if use_input_audio:
             if audio is None:
@@ -517,6 +621,44 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
             raise ValueError(
                 "MMH3ReferenceMultiPrompt needs at least one prompt. Prompts go in one "
                 "string separated by | , in chunk order.")
+
+        # Embeddings are prepended to the prompts BEFORE anything else looks at
+        # them, so the cache key, the fingerprint and the encode all see the real
+        # string rather than one that grows later.
+        if (embeddings or "").strip():
+            per_chunk = _parse_embeddings(embeddings, len(texts))
+            wanted = sorted({n for row in per_chunk for n in row})
+            if not wanted:
+                raise ValueError(
+                    "MMH3ReferenceMultiPrompt: `embeddings` has no usable names. One "
+                    "filename per line, optionally `name: all|N|A-B`.")
+            known = _known_embeddings()
+            if known:
+                missing = [n for n in wanted
+                           if n not in known
+                           and not any(k.startswith(n + ".") for k in known)]
+                if missing:
+                    raise ValueError(
+                        "MMH3ReferenceMultiPrompt: no such embedding(s) in "
+                        "models/embeddings: %s.\nA name that does not resolve is "
+                        "dropped with only a log line, so this stops instead."
+                        % ", ".join(missing))
+            if not _embeddings_resolve(clip, wanted[0]):
+                raise ValueError(
+                    "MMH3ReferenceMultiPrompt: this ComfyUI does not splice "
+                    "`embedding:` into H3 prompts -- the marker tokenizes as ordinary "
+                    "words and nothing is added. Needs #15808 (merged 2026-08-22). "
+                    "Update, or clear `embeddings`.")
+            costs = {n: _embedding_rows(n) for n in wanted}
+            texts = [(" ".join("embedding:%s" % n for n in per_chunk[i]) + " " + t).strip()
+                     if per_chunk[i] else t
+                     for i, t in enumerate(texts)]
+            spread = ["chunk %d: %s (%s slots)"
+                      % (i + 1, ", ".join(row) or "none",
+                         sum(costs.get(n) or 0 for n in row))
+                      for i, row in enumerate(per_chunk)]
+            logging.info("[MMH3ReferenceMultiPrompt] embeddings prepended -- %s",
+                         "; ".join(spread[:4]) + (" ..." if len(spread) > 4 else ""))
 
         raw_inputs = [ref_images]
         for group in (ref_videos, ref_video_audios, ref_audios):

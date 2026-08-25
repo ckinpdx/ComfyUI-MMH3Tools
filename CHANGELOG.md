@@ -9,6 +9,38 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.88.0
+
+### Added
+
+- **`MMH3ReferenceMultiPrompt`: `embeddings` (appended LAST).** Prepends H3 text
+  embeddings to every chunk's prompt, so `embedding:<name>` does not have to be typed
+  into nine pipe-separated prompts by hand and retyped whenever an LLM rewrites them.
+
+  One filename per line from `models/embeddings/`. A bare name goes on every chunk;
+  `name: N` or `name: A-B` (1-based) schedules it, which costs nothing to support
+  because each chunk already has its own prompt. Lines stack.
+
+  Measured on this core: a plain prompt splices 0 vectors, `minimaxh3_bullet_time`
+  splices **94** — exactly that file's row count — and stacking `storm_magic` gives
+  **231 = 94 + 137**. So chaining is additive in both cost and effect, and the node
+  reads each file's header to print the per-chunk slot total. They are attended at
+  EVERY sampling step of every chunk, so that total is the number that matters.
+
+  Two refusals rather than silent no-ops: a name with no matching file stops the run
+  (core would drop it with only a log line), and a core that does not splice
+  `embedding:` in H3 prompts stops it too. The latter is **probed**, not inferred from
+  a version — before #15808 the H3 tokenizer never looked for the marker and it went
+  through as ordinary words, which is invisible in the output.
+
+  These are DiffSynth-Studio's *Diffusion Templates*: textual inversion for H3, offered
+  as a lightweight alternative to LoRA on a model whose size makes LoRA training hard.
+
+  Note the open question recorded when they were first examined — the files are
+  encoder-OUTPUT-space vectors (row norms ~648 against the input embedding table's
+  ~1.46) being spliced at the INPUT layer. They resolve, they are the right shape and
+  they cost what they should; whether they do what DiffSynth intended is unverified.
+
 ## [Unreleased] — 0.87.1
 
 ### Changed — documentation

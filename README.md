@@ -357,6 +357,27 @@ for any node is in its tooltip.
   node does. Either way the node logs each reference's incoming and resolved size, and
   says so when a multi-image batch arrives.
 
+  **`window_ref_video` cuts the reference video to each chunk's own span.** Off by
+  default and byte-identical when off. On, the node encodes one reference set per
+  chunk instead of one for the sequence, so chunk *i* is conditioned on the footage it
+  is actually rendering. The spans come from the **same `_plan`** the sampler and
+  Window Plan run, so reference window *i* is by construction the span chunk *i*
+  renders — wire the sampler's own `chunk_frames` and `overlap_frames`, or they stop
+  matching and every chunk conditions on somebody else's footage.
+
+  The soundtrack is windowed with it, cut on the **same clock** (seconds) rather than
+  by latent arithmetic — 24 fps against 40 Hz is not additive, so cutting each from
+  seconds is exact where deriving one from the other accumulates drift. Measured 0.00
+  frames of drift across four windows.
+
+  It costs N text-encodes rather than one, but **inside a single text-encoder load** —
+  N forward passes, not N model swaps, which is the thing this node exists to protect.
+  The vision work is partitioned, not duplicated. And at sampling time it is *cheaper*:
+  reference tokens are attended at every step, and a window is a fraction of the whole
+  reference — measured at **~32%** for a 600-frame reference in four windows.
+  Timestamps restart at 0 within each window, which is what the model sees at
+  generation time.
+
   **All audio is normalised to STEREO before it reaches the VAE.** H3's audio VAE
   expects two channels and core's `_encode_ref_audio` hands the waveform straight to
   it, so a mono track encodes without complaint and is quietly wrong — sglang refuses

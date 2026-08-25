@@ -38,6 +38,7 @@ from comfy_extras.nodes_minimax_h3 import (
 )
 
 from .common import evict_text_encoder
+from .nodes_windows import _plan, _window_frame_spans
 
 MMH3CondSet = io.Custom("MMH3_COND_SET")
 
@@ -99,8 +100,46 @@ def _fingerprint(ref_blocks, raw_inputs, width, height, length, ref_image_size):
     return h.hexdigest()
 
 
+def _window_media(frames, soundtrack, span, fps=FPS):
+    """A reference video and its audio cut to `span` = (first_frame, last_frame).
+
+    The audio is cut on the SAME clock rather than by latent arithmetic: the two
+    streams run on independent grids (24 fps against 40 Hz) and the conversion is not
+    additive, so cutting each from seconds is exact where cutting one from the other
+    accumulates drift.
+    """
+    a, b = span
+    out_frames = frames[a:b + 1] if frames is not None else None
+    out_audio = soundtrack
+    if soundtrack is not None and soundtrack.get("waveform") is not None:
+        sr = int(soundtrack.get("sample_rate") or 0)
+        wf = soundtrack["waveform"]
+        if sr > 0 and wf.ndim == 3:
+            s0 = int(round(a / float(fps) * sr))
+            s1 = int(round((b + 1) / float(fps) * sr))
+            s0 = max(0, min(s0, int(wf.shape[-1])))
+            s1 = max(s0, min(s1, int(wf.shape[-1])))
+            out_audio = dict(soundtrack)
+            out_audio["waveform"] = wf[..., s0:s1].contiguous()
+    return out_frames, out_audio
+
+
+def _ref_windows(total_frames, chunk_frames, overlap_frames):
+    """(first, last) per chunk, from the SAME plan the sampler runs.
+
+    `standard_static` and the argument order are copied from the sampler's own call,
+    not chosen here -- if these drifted apart, reference window i would stop being the
+    span chunk i renders and every chunk would be conditioned on somebody else's
+    footage, silently.
+    """
+    _length, _overlap, total_f, _total_t, windows = _plan(
+        int(total_frames), int(chunk_frames), int(overlap_frames), "standard_static")
+    return _window_frame_spans(windows, total_f)
+
+
 def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
-                ref_images, ref_videos, ref_video_audios, ref_audios):
+                ref_images, ref_videos, ref_video_audios, ref_audios,
+                ref_window=None):
     """Reference items (for the tokenizer) and blocks (for the DiT), built once.
 
     DUPLICATED FROM comfy_extras/nodes_minimax_h3.py, deliberately: upstream runs
@@ -163,6 +202,11 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
         if video_frames is None:
             continue
         soundtrack = ref_video_audios.get("ref_video_audio_" + name.rsplit("_", 1)[-1])
+        if ref_window is not None:
+            # cut BEFORE the resize and the encode: windowing after would pay the
+            # full reference's VAE and vision cost to then throw most of it away
+            video_frames, soundtrack = _window_media(video_frames, soundtrack,
+                                                     ref_window)
         vh, vw = video_frames.shape[1], video_frames.shape[2]
         cw, ch = adapt_canvas(vw, vh)
         if vw * vh < cw * ch:
@@ -409,6 +453,31 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                             "RAM.\n\n"
                             "The cost is a reload the next time any node needs the "
                             "encoder, including a re-run with one prompt edited."),
+                io.Boolean.Input(
+                    "window_ref_video", default=False, optional=True,
+                    tooltip="Cut the REFERENCE VIDEO (and its soundtrack) to each "
+                            "chunk's own span, so chunk i is conditioned on the footage "
+                            "it is actually rendering instead of the whole reference "
+                            "every time.\n\n"
+                            "Costs one text-encode PER CHUNK rather than one for the "
+                            "sequence -- still a single text-encoder load, so it is N "
+                            "forward passes, not N model swaps. The vision work is "
+                            "partitioned rather than duplicated: each chunk encodes "
+                            "1/N of the frames. At sampling time it is cheaper, since "
+                            "reference tokens are attended at EVERY step and each chunk "
+                            "now carries only its window.\n\n"
+                            "Needs `chunk_frames` and `overlap_frames` wired -- the "
+                            "SAME values the sampler gets, or the windows stop matching "
+                            "the chunks. Off, nothing changes."),
+                io.Int.Input(
+                    "chunk_frames", default=0, min=0, max=100000, step=1, optional=True,
+                    tooltip="Only read when `window_ref_video` is on. Wire the sampler's "
+                            "own `chunk_frames` -- from MMH3 Chunk Schedule, not typed "
+                            "again."),
+                io.Int.Input(
+                    "overlap_frames", default=0, min=0, max=100000, step=1, optional=True,
+                    tooltip="Only read when `window_ref_video` is on. Wire the sampler's "
+                            "own `overlap_frames`."),
             ],
             outputs=[
                 MMH3CondSet.Output(display_name="cond_set"),
@@ -421,6 +490,7 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
     def execute(cls, clip, vae, audio_vae, width, height, length, ref_image_size,
                 prompts=None, ref_images=None, ref_videos=None, ref_video_audios=None,
                 ref_audios=None, audio=None, use_input_audio=False,
+                window_ref_video=False, chunk_frames=0, overlap_frames=0,
                 unload_text_encoder=True) -> io.NodeOutput:
         latent, frame_count = _empty_av_latent(width, height, length)
         if use_input_audio:
@@ -437,18 +507,51 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                 "MMH3ReferenceMultiPrompt needs at least one prompt. Prompts go in one "
                 "string separated by | , in chunk order.")
 
-        ref_items, ref_blocks = _build_refs(
-            vae, audio_vae, width, height, frame_count, ref_image_size,
-            ref_images, ref_videos, ref_video_audios, ref_audios)
-
         raw_inputs = [ref_images]
         for group in (ref_videos, ref_video_audios, ref_audios):
             raw_inputs.extend((group or {}).values())
-        fp = _fingerprint(ref_blocks, raw_inputs, width, height, length, ref_image_size)
+
+        # Per-chunk reference windows, or one reference set for every prompt.
+        windows = None
+        if window_ref_video and (ref_videos or {}):
+            if int(chunk_frames) <= 0:
+                raise ValueError(
+                    "MMH3ReferenceMultiPrompt: `window_ref_video` is on but "
+                    "`chunk_frames` is 0. Wire the sampler's own chunk_frames and "
+                    "overlap_frames, or the reference windows will not be the spans "
+                    "the sampler renders.")
+            windows = _ref_windows(frame_count, int(chunk_frames), int(overlap_frames))
+            if len(windows) != len(texts):
+                logging.warning(
+                    "[MMH3ReferenceMultiPrompt] %d prompt(s) against %d reference "
+                    "window(s). Prompt i is paired with window i and the shorter list "
+                    "decides; check that chunk_frames/overlap_frames match the sampler.",
+                    len(texts), len(windows))
+            logging.info("[MMH3ReferenceMultiPrompt] windowing the reference video into "
+                         "%d span(s): %s", len(windows),
+                         ", ".join("%d-%d" % w for w in windows[:6])
+                         + (" ..." if len(windows) > 6 else ""))
+
+        shared = None
+        if windows is None:
+            shared = _build_refs(
+                vae, audio_vae, width, height, frame_count, ref_image_size,
+                ref_images, ref_videos, ref_video_audios, ref_audios)
+            ref_items, ref_blocks = shared
+            fp = _fingerprint(ref_blocks, raw_inputs, width, height, length,
+                              ref_image_size)
 
         conds = []
         hits = 0
-        for text in texts:
+        for pi, text in enumerate(texts):
+            if windows is not None:
+                span = windows[min(pi, len(windows) - 1)]
+                ref_items, ref_blocks = _build_refs(
+                    vae, audio_vae, width, height, frame_count, ref_image_size,
+                    ref_images, ref_videos, ref_video_audios, ref_audios,
+                    ref_window=span)
+                fp = _fingerprint(ref_blocks, raw_inputs + [span], width, height,
+                                  length, ref_image_size)
             key = (text, fp)
             cached = _CACHE.get(key)
             if cached is not None:

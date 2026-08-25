@@ -9,6 +9,44 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.86.0
+
+### Added
+
+- **`MMH3ReferenceMultiPrompt`: `window_ref_video`, `chunk_frames`, `overlap_frames`
+  (appended LAST, after `unload_text_encoder`).** Cuts the reference video and its
+  soundtrack to each chunk's own span, so chunk *i* is conditioned on the footage it
+  renders rather than the whole reference every time. Requested by **xwsswww** in
+  `minimax_h3_resources`.
+
+  Windowing only the DiT latent would have been cheaper and wrong: the reference also
+  goes through Qwen as `<Video k>: ` plus a vision block per 2 frames with timestamps,
+  so the text would describe a reference the model was not handed. This re-encodes per
+  chunk instead, which keeps the conditioning on distribution — the point of doing it
+  at all.
+
+  **The cost is smaller than it sounds, and negative at sampling time.** N encodes
+  happen inside ONE text-encoder load, so it is N forward passes rather than N model
+  swaps. The vision work is partitioned, not duplicated — each chunk encodes 1/N of
+  the frames. And reference tokens are attended at EVERY step, so a per-chunk window
+  cuts what each chunk carries: measured **latent_t 177 -> 57, ref_audio_t 1000 -> 320,
+  about 32%**, for a 600-frame reference in four windows.
+
+  Spans come from `_plan` + `_window_frame_spans` with `"standard_static"` — the same
+  call the sampler makes, copied rather than re-derived, because if they drifted apart
+  every chunk would condition on the wrong footage silently. Raises if `chunk_frames`
+  is 0, and warns when the window count does not match the prompt count.
+
+  The soundtrack is cut on the **same clock** (seconds), not by latent arithmetic:
+  24 fps against 40 Hz is not additive, so deriving one from the other accumulates
+  drift. Measured 0.00 frames of drift across all four windows. Timestamps restart at 0
+  within each window.
+
+  Off by default, and off is byte-identical to before. Verified that all nine saved
+  workflows still map their 7 stored widget values onto the first 7 widgets — the three
+  new inputs went in **before** `unload_text_encoder` on the first attempt, which would
+  have rebound that trailing `True` onto `window_ref_video`.
+
 ## [Unreleased] — 0.85.1
 
 ### Fixed

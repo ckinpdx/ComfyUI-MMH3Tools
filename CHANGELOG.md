@@ -9,6 +9,28 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.89.0
+
+### Added
+
+- **`MMH3EmbeddingSelect` — "MMH3 Embedding Select", `MMH3Tools/conditioning`.** A
+  dropdown picker for H3 text embeddings plus a `chunks` range, chained through
+  `previous`, emitting the spec string `MMH3ReferenceMultiPrompt.embeddings` parses.
+
+  0.88.0 shipped that input as a typed multiline field, which is not how a model file
+  gets chosen anywhere in ComfyUI. A typo there is especially bad: core drops an
+  unresolvable `embedding:` with a log line rather than an error, so the render just
+  quietly lacks the embedding. The reference node's schema is unchanged — the picker's
+  output is a STRING, so it wires straight into the existing input.
+
+  The dropdown lists the **whole folder**. A first cut filtered it to 5120-wide files,
+  which was wrong twice over: no other loader filters, and it meant reading every
+  header at schema-build time, so a file whose header would not parse was included or
+  excluded on the strength of an exception — `conditioningPOS.safetensors` on this
+  machine returns no readable shape and was being listed by that accident rather than
+  by intent. The width is checked at execute instead, naming both numbers; an
+  unreadable header reports its slot count as `?` and is allowed through.
+
 ## [Unreleased] — 0.88.0
 
 ### Added

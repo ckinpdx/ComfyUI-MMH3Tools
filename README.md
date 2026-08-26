@@ -407,10 +407,11 @@ for any node is in its tooltip.
   Timestamps restart at 0 within each window, which is what the model sees at
   generation time.
 
-  **`embeddings` prepends H3 text embeddings to every chunk's prompt.** One filename
-  per line from `models/embeddings/`; a bare name goes on every chunk, `name: N` or
-  `name: A-B` (1-based) schedules it, which works because each chunk has its own prompt
-  anyway. Several lines stack, and their cost is exactly additive — measured, a plain
+  **`embeddings` prepends H3 text embeddings to every chunk's prompt.** Wire
+  **MMH3 Embedding Select** into it rather than typing filenames — that node is a
+  picker over `models/embeddings/`, chained one per embedding. The field itself takes
+  one filename per line, a bare name going on every chunk and `name: N` or `name: A-B`
+  (1-based) scheduling it, which works because each chunk has its own prompt anyway. Several lines stack, and their cost is exactly additive — measured, a plain
   prompt splices 0 vectors, `bullet_time` splices 94 (its exact row count), and
   `bullet_time` + `storm_magic` splices 231 = 94 + 137.
 
@@ -454,6 +455,21 @@ for any node is in its tooltip.
   and what batching would have cropped them to, and warns past 9 references — they are
   attended at **every** sampling step, so the cost lands on every chunk of every pass.
   (9 is the hosted API's cap, not the model's.)
+
+- **MMH3 Embedding Select** — choose an H3 text embedding from a dropdown and say which
+  chunks carry it, then wire the output into **MMH3 Reference (Multi-Prompt)**'s
+  `embeddings`. Chain one per embedding through `previous` to stack them; costs and
+  effects are both additive.
+
+  It exists because a model file should never be typed. The reference node's field is a
+  spec string, and a typo in one resolves to nothing — core drops an unresolvable
+  `embedding:` with a log line, not an error.
+
+  The dropdown lists the **whole folder**, like every other loader. H3's embeddings are
+  5120 wide and an SD/SDXL textual inversion in the same folder is 768 or 1280; picking
+  one is refused at run time with both numbers named, rather than being hidden from the
+  list. A file whose header will not parse is listed and allowed through — its slot
+  count simply reports as `?`.
 
 - **MMH3 Cond Set Apply ControlNet** — applies a MiniMax H3 **Fun ControlNet** to
   every prompt in a cond set, so a chunked render can use one. Core's apply node takes

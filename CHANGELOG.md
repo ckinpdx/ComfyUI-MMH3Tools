@@ -9,6 +9,30 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.90.0
+
+### Changed
+
+- **`MMH3ReferenceMultiPrompt.embeddings` is now a socket, not a widget**
+  (`force_input=True`). 0.88.0 added it as a multiline text field and 0.89.0 added the
+  picker beside it; keeping both meant the wrong one was still the obvious one. A model
+  file should be chosen from a list, and this input's failure mode makes that sharper
+  than usual — core drops an unresolvable `embedding:` with a log line rather than an
+  error, so a typo costs a whole render and says nothing.
+
+  Scheduling is unaffected and always lived on the Select node, not on the chain: each
+  one carries its own `chunks` range (`all`, `3`, `4-6`), and `previous` only
+  concatenates spec lines. One node per embedding, its own schedule, chained to stack.
+  The chain is a chain rather than one Autogrow node because an Autogrow group takes a
+  single input template — it can give N pickers or N range fields, but not N *pairs*,
+  and the pair is what makes per-embedding scheduling possible.
+
+  **Serialisation:** removing a widget rebinds saved values positionally, so this was
+  checked mechanically first — all ten workflows carrying the node store 7 or 10 widget
+  values, never 11, and none has an `embeddings` entry at all. Nothing rebinds. A graph
+  saved by hand between 0.88.0 and 0.90.0 with text in that field will lose it and must
+  be rewired to a Select node.
+
 ## [Unreleased] — 0.89.0
 
 ### Added

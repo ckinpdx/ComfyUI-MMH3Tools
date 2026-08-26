@@ -407,13 +407,18 @@ for any node is in its tooltip.
   Timestamps restart at 0 within each window, which is what the model sees at
   generation time.
 
-  **`embeddings` prepends H3 text embeddings to every chunk's prompt.** Wire
-  **MMH3 Embedding Select** into it rather than typing filenames — that node is a
-  picker over `models/embeddings/`, chained one per embedding. The field itself takes
-  one filename per line, a bare name going on every chunk and `name: N` or `name: A-B`
-  (1-based) scheduling it, which works because each chunk has its own prompt anyway. Several lines stack, and their cost is exactly additive — measured, a plain
-  prompt splices 0 vectors, `bullet_time` splices 94 (its exact row count), and
-  `bullet_time` + `storm_magic` splices 231 = 94 + 137.
+  **`embeddings` prepends H3 text embeddings to each chunk's prompt.** It is a
+  **socket, not a widget**: wire **MMH3 Embedding Select** into it, one node per
+  embedding, chained through `previous`. A model file gets picked rather than typed,
+  because a name that does not resolve is dropped by core with a log line and no error.
+
+  Scheduling lives on each Select node's own `chunks` field — `all`, `3`, `4-6`,
+  1-based — so the chain schedules as well as stacks. That works because every chunk
+  already has its own prompt and its own text-encode: scheduling is only a question of
+  which prompt strings get the token, with no cross-chunk state to carry. Stacked
+  embeddings are additive in both cost and effect — measured, a plain prompt splices 0
+  vectors, `bullet_time` splices 94 (its exact row count), and `bullet_time` +
+  `storm_magic` splices 231 = 94 + 137.
 
   These are DiffSynth-Studio's *Diffusion Templates* — textual inversion for H3, a
   lightweight alternative to LoRA on a 33B DiT. They are **not free**: 50–142 token

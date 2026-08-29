@@ -199,6 +199,11 @@ and the sampler's `cond_set`, so every chunk gets the control windowed to its ow
 The two refine passes are deliberately left alone: they run at low denoise off zeroed
 conditioning, where a control video would be fighting a picture that already exists.
 
+**MMH3 Chunk Schedule** feeds the reference node's `chunk_frames` and `overlap_frames`
+as well as the sampler's. `window_ref_video` ships **off**, so this changes nothing
+until you turn it on — it is wired ahead precisely so that turning it on cannot put the
+reference windows out of step with the spans the sampler renders.
+
 Needs [PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860) applied (a draft)
 and the union checkpoint from
 [Kijai/MiniMax-H3-experimental](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/controlnet).

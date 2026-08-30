@@ -460,6 +460,8 @@ not written down anywhere, including here.
 | whole output looks noisy / unfinished | `sampling_end_step` below the schedule length — the report says "PARTIALLY denoised" |
 | phase 2 never seems to engage | `phase2_start_step` is 0, or sits outside the `sampling_start/end` window |
 | the tail of every chunk drifts off-prompt | not `phase2_guider` — its positive is replaced per chunk. Look at the cond_set |
+| the reference video restarts from its beginning on every chunk | fewer prompts than windows, so the cond list was short and every chunk fell back to window 0. Fixed in **0.91.0**, which broadcasts one prompt across all windows and refuses any other mismatch. On an older build, write one prompt per chunk |
+| a chunk is conditioned on the wrong footage | preview the reference node's **`ref_windows`** output — two frames per chunk, first and last of its span. If they do not advance, `chunk_frames`/`overlap_frames` here do not match the sampler's |
 
 ---
 

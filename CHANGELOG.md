@@ -9,6 +9,55 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.91.0
+
+### Fixed
+
+- **`window_ref_video` with fewer prompts than windows conditioned every chunk on
+  window 0.** The cond loop iterated `texts`, so one prompt produced one cond no matter
+  how many windows existed. The sampler pairs chunk *i* with `conds[min(i, len - 1)]`,
+  so every chunk after the first reused chunk 0's cond — and with it chunk 0's
+  reference **window**. The reference video restarted from frame 0 on each chunk, which
+  reads in the output as the clip looping back on itself at every seam.
+
+  Nothing failed. The node logged `N prompt(s) against M reference window(s)` at
+  warning level and carried on, which is the failure class this pack exists to refuse:
+  plausible output, no error, and a two-hour diagnosis for the person who hit it.
+
+  The loop now runs over WINDOWS when windowing is on. **One prompt broadcasts** to
+  every window — same text, each chunk carrying its own span, which is the ordinary
+  case and what people expect. Exactly one prompt per window still pairs up. Any other
+  count **raises**, naming both numbers and pointing at the usual cause: `chunk_frames`
+  / `overlap_frames` not matching the sampler's.
+
+  Reported by ucren, 2026-08-30.
+
+### Added
+
+- **`MMH3ReferenceMultiPrompt`: `ref_windows` IMAGE output (appended LAST).** The first
+  and last frame of every reference window, in order, two frames per chunk, at native
+  size and unresized — resampling a diagnostic would hide the off-by-a-window error it
+  exists to catch. A single black tile when `window_ref_video` is off or no reference
+  video is wired.
+
+  The spans were already logged as numbers, which is enough to check the arithmetic and
+  not enough to see that a chunk is looking at the wrong footage. Requested by ucren in
+  the same thread, after the numbers alone left him unsure whether windowing was
+  working at all.
+
+### Changed
+
+- **`MMH3ReferenceMultiPrompt.length` is now LABELLED `total_frames`.** It takes
+  `MMH3ChunkSchedule`'s `total_frames` output, and two names for one quantity cost two
+  separate people a wrong render this week — one asked outright, the other typed a
+  value instead of wiring it and got a 10-second clip from an 8-second schedule.
+
+  The input **id is unchanged** (`length`), so every saved link, every positional
+  widget value and every existing graph is untouched; only the label in the UI moves.
+  The direction was chosen deliberately: `total_frames` is the more descriptive of the
+  two, and renaming the schedule's output instead would have broken the more widely
+  referenced name.
+
 ## [Unreleased] — 0.90.0
 
 ### Changed

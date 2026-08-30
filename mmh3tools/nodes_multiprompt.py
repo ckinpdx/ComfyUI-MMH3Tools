@@ -209,6 +209,34 @@ def _window_media(frames, soundtrack, span, fps=FPS):
     return out_frames, out_audio
 
 
+def _window_preview(ref_videos, windows):
+    """First and last frame of every reference window, so the spans can be SEEN.
+
+    The log already prints the spans as numbers, which is enough to check the
+    arithmetic and not enough to notice that chunk 2 is looking at chunk 0's
+    footage. Two frames per window shows where each chunk's reference actually
+    starts and ends, in order, at native size.
+
+    Frames are taken from the FIRST reference video and are not resized -- this is
+    a diagnostic, not a reference, and resampling it would hide exactly the kind of
+    off-by-a-window error it exists to catch.
+    """
+    vids = [v for v in (ref_videos or {}).values() if v is not None]
+    if not vids or not windows:
+        return torch.zeros((1, 64, 64, 3))
+    src = vids[0]
+    n = int(src.shape[0])
+    if n == 0:
+        return torch.zeros((1, 64, 64, 3))
+    out = []
+    for a, b in windows:
+        a = max(0, min(int(a), n - 1))
+        b = max(a, min(int(b), n - 1))
+        out.append(src[a:a + 1])
+        out.append(src[b:b + 1])
+    return torch.cat(out, dim=0)
+
+
 def _ref_windows(total_frames, chunk_frames, overlap_frames):
     """(first, last) per chunk, from the SAME plan the sampler runs.
 
@@ -472,7 +500,8 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                 io.Vae.Input("audio_vae"),
                 io.Int.Input("width", default=1344, min=32, max=16384, step=32),
                 io.Int.Input("height", default=768, min=32, max=16384, step=32),
-                io.Int.Input("length", default=192, min=5, max=3600, step=17,
+                io.Int.Input("length", display_name="total_frames",
+                             default=192, min=5, max=3600, step=17,
                              tooltip="Frames at 24 fps for the latent this node emits, "
                                      "shared by every prompt. Snapped to the 17j+5 grid.\n\n"
                                      "MMH3 Looping Sampler and MMH3 Context Windows both "
@@ -600,6 +629,14 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                 MMH3CondSet.Output(display_name="cond_set"),
                 io.Latent.Output(display_name="latent"),
                 io.Int.Output(display_name="count"),
+                io.Image.Output(
+                    display_name="ref_windows",
+                    tooltip="The first and last frame of every reference window, in "
+                            "order -- two frames per chunk. Only meaningful with "
+                            "`window_ref_video` on; otherwise a single black tile.\n\n"
+                            "Preview it to see what each chunk is actually conditioned "
+                            "on. A span that restarts at the beginning of the reference "
+                            "means the windows are not the spans the sampler renders."),
             ],
         )
 
@@ -676,12 +713,25 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                     "overlap_frames, or the reference windows will not be the spans "
                     "the sampler renders.")
             windows = _ref_windows(frame_count, int(chunk_frames), int(overlap_frames))
-            if len(windows) != len(texts):
-                logging.warning(
-                    "[MMH3ReferenceMultiPrompt] %d prompt(s) against %d reference "
-                    "window(s). Prompt i is paired with window i and the shorter list "
-                    "decides; check that chunk_frames/overlap_frames match the sampler.",
-                    len(texts), len(windows))
+            # One prompt BROADCASTS across every window: the same text, each chunk
+            # carrying its own span. Anything else must match one-for-one.
+            #
+            # This used to warn and carry on, which produced the worst possible
+            # output: the cond list came out SHORT, the sampler pairs chunk i with
+            # conds[min(i, len-1)], and so every chunk after the first reused chunk
+            # 0's cond -- and with it chunk 0's reference WINDOW. The reference video
+            # restarted from frame 0 on every chunk, which reads as the clip looping
+            # back on itself at each seam, with nothing in the output to say why.
+            if len(texts) not in (1, len(windows)):
+                raise ValueError(
+                    "MMH3ReferenceMultiPrompt: %d prompt(s) against %d reference "
+                    "window(s). Give ONE prompt (it is used for every window) or "
+                    "exactly %d, one per window.\n\n"
+                    "A mismatch usually means `chunk_frames`/`overlap_frames` here do "
+                    "not match the sampler's. Wire both from the SAME MMH3 Chunk "
+                    "Schedule, and wire its `total_frames` output into this node's "
+                    "`total_frames`."
+                    % (len(texts), len(windows), len(windows)))
             logging.info("[MMH3ReferenceMultiPrompt] windowing the reference video into "
                          "%d span(s): %s", len(windows),
                          ", ".join("%d-%d" % w for w in windows[:6])
@@ -698,9 +748,14 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
 
         conds = []
         hits = 0
-        for pi, text in enumerate(texts):
+        # With windowing on there is one cond PER WINDOW, not per prompt -- a single
+        # prompt is reused for all of them. Iterating `texts` here is what made the
+        # cond list short and every later chunk fall back to window 0.
+        n_conds = len(texts) if windows is None else len(windows)
+        for pi in range(n_conds):
+            text = texts[min(pi, len(texts) - 1)]
             if windows is not None:
-                span = windows[min(pi, len(windows) - 1)]
+                span = windows[pi]
                 ref_items, ref_blocks = _build_refs(
                     vae, audio_vae, width, height, frame_count, ref_image_size,
                     ref_images, ref_videos, ref_video_audios, ref_audios,
@@ -729,7 +784,8 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
         logging.info("[MMH3ReferenceMultiPrompt] %d prompts, %d refs, %d frames "
                      "(%d encodes reused)", len(conds), len(ref_blocks), frame_count, hits)
         return io.NodeOutput({"conds": conds, "prompts": texts, "fingerprint": fp},
-                             latent, len(conds))
+                             latent, len(conds),
+                             _window_preview(ref_videos, windows))
 
 
 class MMH3CondSelect(io.ComfyNode):

@@ -399,6 +399,21 @@ for any node is in its tooltip.
   renders — wire the sampler's own `chunk_frames` and `overlap_frames`, or they stop
   matching and every chunk conditions on somebody else's footage.
 
+  **One prompt is reused for every window.** Give one and it broadcasts; give exactly
+  one per window and they pair up. Anything else **refuses**, because the old
+  behaviour — warn, and let the shorter list decide — produced the worst available
+  output: the cond list came out short, the sampler pairs chunk *i* with
+  `conds[min(i, len-1)]`, and so every chunk after the first reused chunk 0's cond and
+  with it chunk 0's reference *window*. The reference restarted from frame 0 on every
+  chunk, which reads as the clip looping back on itself at each seam with nothing to
+  say why. Reported 2026-08-30 and fixed in 0.91.0.
+
+  **`ref_windows` shows what each chunk actually sees** — the first and last frame of
+  every window, in order, two frames per chunk, at native size. The log has always
+  printed the spans as numbers, which is enough to check arithmetic and not enough to
+  notice a chunk looking at the wrong footage. Preview it; a span that restarts at the
+  beginning of the reference means the windows are not the spans the sampler renders.
+
   The soundtrack is windowed with it, cut on the **same clock** (seconds) rather than
   by latent arithmetic — 24 fps against 40 Hz is not additive, so cutting each from
   seconds is exact where deriving one from the other accumulates drift. Measured 0.00

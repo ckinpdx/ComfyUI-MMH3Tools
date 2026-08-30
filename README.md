@@ -167,7 +167,9 @@ sampler, finishing on a chunked pixel-upscale ladder.
 
 [`workflows/MMH3_Looping_I2V_ManualPrompt.json`](workflows/) — the same
 image-to-video start with the prompt **typed, not generated**: no LLM anywhere in the
-graph, just a `PrimitiveStringMultiline` feeding **MMH3 Reference MultiPrompt**. Use it
+graph, just a `PrimitiveStringMultiline` feeding **MMH3 Reference MultiPrompt**. It also
+carries **MMH3 Live Preview**, sitting after the LoRA so every guider in the graph
+inherits it — the generate pass and both refines each push their own filmstrip. Use it
 when you already know the shot and want the prompt-building half out of the way.
 
 It is also the fullest example of the **three-stage ladder**. One looping sampler

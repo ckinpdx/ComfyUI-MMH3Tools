@@ -9,6 +9,45 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.92.0
+
+### Added
+
+- **`MMH3LivePreview` — "MMH3 Live Preview", `MMH3Tools/sampling`.** A filmstrip of the
+  chunks finished so far, pushed while MMH3 Looping Sampler is still running. Passes
+  the model through unchanged and registers a config on the patcher.
+
+  A chunked render is the case a progress bar serves worst: step 34 of 160 says nothing
+  about whether chunk 2 is looking at the right footage. Each chunk's latent was already
+  in hand at write-back and was discarded.
+
+  **The sampler discovers the preview rather than owning it.** `begin_preview` asks the
+  model patcher for the wrapper and returns `None` when nobody wired one, so the
+  sampling path is unchanged when the feature is off — one nullable object instead of
+  preview logic threaded through the loop.
+
+  **Spans follow `FRAME_PER_TOKEN = (1, 4, 4, 4, 4)`.** Latents do not cover equal
+  spans: the first of every 17-frame group covers ONE frame and the rest four, so
+  `(stop - start) * 4` overstates a group-aligned window by three frames. Verified:
+  `span_frames(0, 5) == 17`, not 20.
+
+  Decode is `latent_rgb_factors` off `MiniMaxH3Video` — a 24×3 projection needing no
+  model file, no VAE and no download. An approximation by construction; a latent whose
+  channel count does not match the format is refused rather than projected, since a
+  wrong projection yields a confident meaningless image. Transport is core's
+  `UNENCODED_PREVIEW_IMAGE` binary channel, so no custom front-end ships here. Any
+  error disables the preview for the run rather than failing the render.
+
+  Tiles come from the MIDDLE of each chunk: the opening latents are the carry from the
+  previous chunk, so a strip of first frames would mostly show the chunk before.
+
+  > The wrapper-discovery pattern and the FRAME_PER_TOKEN span arithmetic are
+  > reimplemented from [hradec's
+  > ComfyUI-HR-Endless-Sampler](https://github.com/hradec/ComfyUI-HR-Endless-Sampler)
+  > (Apache-2.0). Ideas only — no code was copied, and the decode and transport here
+  > are different choices (their build is a hand-rebuilt TAESD pushed over a custom
+  > websocket event with its own 60 KB front-end).
+
 ## [Unreleased] — 0.91.0
 
 ### Fixed

@@ -965,6 +965,33 @@ a choice here — now lives in
   fp32 latent), and `accumulator_device: cpu` hosts the remaining accumulators in
   system RAM, writing window-sized slices across PCIe during the loop and moving
   the fused result back once per step. Values are identical either way.
+- **MMH3 Live Preview** — a filmstrip of the chunks finished so far, pushed while the
+  sampler is still running. Wire it between the model and whatever builds the guider;
+  it passes the model through unchanged and only registers itself.
+
+  A chunked render is where a progress bar tells you least: it says step 34 of 160 and
+  nothing about whether the shots are the right ones in the right order. Each chunk's
+  latent is in hand the moment it is written back, and was being thrown away.
+
+  One tile per finished chunk, taken from the **middle** of the chunk — a chunk's
+  opening latents are the carry from the one before it, so a strip of first frames
+  would largely show the previous chunk. The last 16 are kept.
+
+  The decode is `latent_rgb_factors`, a 24×3 projection: no model file, no VAE, no
+  download, one matmul. It is an **approximation** — colour is indicative, fine detail
+  is absent — and it answers the question the step counter cannot. A latent whose
+  channel count does not match the format is refused rather than projected, because a
+  wrong projection produces a confident meaningless image.
+
+  The image arrives on core's own `UNENCODED_PREVIEW_IMAGE` channel, the one the
+  built-in latent previewer uses, so there is no custom front-end. Any error switches
+  the preview off for the run rather than interrupting it.
+
+  The sampler **discovers** it rather than owning it: `begin_preview` returns `None`
+  when nothing is wired, and the sampling path is then byte-identical. The
+  wrapper-discovery shape and the FRAME_PER_TOKEN span arithmetic are reimplemented
+  from [hradec's ComfyUI-HR-Endless-Sampler](https://github.com/hradec/ComfyUI-HR-Endless-Sampler)
+  (Apache-2.0); no code was copied.
 - **MMH3 Chunk Schedule** — say roughly what you want; get a schedule that actually
   tiles. Solves total, window and overlap **together** and emits frames.
 

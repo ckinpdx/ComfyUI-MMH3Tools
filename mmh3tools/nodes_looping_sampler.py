@@ -68,6 +68,7 @@ from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
                      pack_av, unpack_av)
 from .nodes_loop import per_row_mask_is_continuous
 from .nodes_multiprompt import MMH3CondSet
+from .nodes_preview import begin_preview
 from .nodes_windows import _audio_index_at, _plan, _window_frame_spans
 
 _GUIDE_KEYS = ("minimax_keyframes", "minimax_frame_count")
@@ -803,6 +804,12 @@ class MMH3LoopingSampler(io.ComfyNode):
                 in_mask_a = ma if in_mask_a is None else torch.minimum(
                     in_mask_a.to(ma.dtype), ma)
 
+        # None unless something wired MMH3 Live Preview onto the model. The
+        # sampler must behave identically when it is None, which is why the preview
+        # is DISCOVERED here rather than owned: no wiring, no object, no branch that
+        # can change a render.
+        preview = begin_preview(getattr(guider, "model_patcher", None), len(windows))
+
         for i, w in enumerate(windows):
             idx = w.index_list
             v0, v1 = idx[0] + offset, min(idx[-1] + 1 + offset, total_t)
@@ -890,6 +897,8 @@ class MMH3LoopingSampler(io.ComfyNode):
                             ", %d keyframe(s)" % (len(chunk_guides) - (1 if carried
                                                   and carry == "keyframe" else 0))
                             if guides_by_chunk.get(i) else ""))
+            if preview is not None:
+                preview.chunk(i, dv, v0, v1)
             logging.info("[MMH3LoopingSampler] chunk %d/%d done", i + 1, n)
 
         # The first generated chunk OVERLAPS the prior -- that is what the carry is --

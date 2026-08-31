@@ -1180,9 +1180,15 @@ a choice here — now lives in
   `("ref_audio", rt * 2)` segments, one per reference in order, and the probe captures
   that list the way Sol-Attn does.
 
-  Wire the probe anywhere in the model chain, render, then read the Map: one row per
-  reference, time along x. It chains any existing attention override, so it coexists
-  with Sol-Attn.
+  Wire the probe anywhere in the model chain, and put the Map **in the latent chain
+  after the sampler** — it takes the sampler's `latent` and passes it through unchanged.
+  That input is never read: it exists so the Map has a dependency. Without one the node
+  has no edges at all, ComfyUI is free to schedule it *before* the sampler against a
+  recording that does not exist yet, and its output would cache against widget values
+  that never change. Feed the latent on to whatever decodes or saves.
+
+  Then read it: one row per reference, time along x. It chains any existing attention
+  override, so it coexists with Sol-Attn.
 
   **It judges per moment, never on the time average.** Under a working binding — one
   reference leading while speaker A talks, the other while B talks — the two averages

@@ -320,6 +320,17 @@ class MMH3RefAttentionMap(io.ComfyNode):
                 "what the output took from it."
             ),
             inputs=[
+                io.Latent.Input(
+                    "latent",
+                    tooltip="The sampler's output, PASSED THROUGH unchanged. It is "
+                            "never read -- it is here so this node sits IN the "
+                            "chain rather than beside it.\n\n"
+                            "Without it this node has no dependencies at all, and "
+                            "ComfyUI is free to run it BEFORE the sampler, against a "
+                            "recording that does not exist yet. Feeding the latent on "
+                            "to whatever decodes or saves makes the ordering "
+                            "structural instead of incidental, and stops the result "
+                            "being cached against unchanging widget values."),
                 io.Int.Input("height", default=64, min=8, max=512, step=8,
                              tooltip="Pixel height of each reference's band."),
                 io.Int.Input("width", default=1024, min=64, max=4096, step=64,
@@ -335,11 +346,12 @@ class MMH3RefAttentionMap(io.ComfyNode):
             outputs=[
                 io.Image.Output(display_name="heatmap"),
                 io.String.Output(display_name="report"),
+                io.Latent.Output(display_name="latent"),
             ],
         )
 
     @classmethod
-    def execute(cls, height, width, normalize_columns=False) -> io.NodeOutput:
+    def execute(cls, latent, height, width, normalize_columns=False) -> io.NodeOutput:
         mass, hits = _RECORD["mass"], _RECORD["hits"]
         if mass is None or not hits:
             blank = torch.zeros(1, height, width, 3)
@@ -349,7 +361,7 @@ class MMH3RefAttentionMap(io.ComfyNode):
                 "wired into the model chain first.\n"
                 "  If you did: the run had no reference blocks, or `layers` excluded "
                 "every block that ran."
-                + ("\n  ! " + _RECORD["note"] if _RECORD["note"] else "")))
+                + ("\n  ! " + _RECORD["note"] if _RECORD["note"] else "")), latent)
 
         m = (mass / float(hits)).transpose(0, 1)             # [refs, blocks]
         labels = _RECORD["labels"] or ["ref %d" % i for i in range(m.shape[0])]
@@ -423,4 +435,4 @@ class MMH3RefAttentionMap(io.ComfyNode):
                      "output took the voice.")
         if _RECORD["note"]:
             lines.append("  ! " + _RECORD["note"])
-        return io.NodeOutput(out, "\n".join(lines))
+        return io.NodeOutput(out, "\n".join(lines), latent)

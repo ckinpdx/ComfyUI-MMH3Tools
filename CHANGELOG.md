@@ -9,6 +9,23 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.95.1
+
+### Fixed
+
+- **`MMH3RefAttentionMap` had no way to be ordered after the sampler.** It took only
+  widgets, so it had no graph dependencies at all — ComfyUI was free to execute it
+  BEFORE sampling, against a recording that did not exist yet, and with no changing
+  input its result would cache against widget values that never move.
+
+  It now takes the sampler's `latent` and **passes it through unchanged** as a third
+  output, so it sits in the chain rather than beside it. The latent is never read; the
+  edge is the point. Both return paths pass it on, including the nothing-recorded one.
+
+  `MMH3GetPreviewFrames` was built with this reasoning and the Map was not — the same
+  mistake, caught here rather than in a render. The node appears in no workflow, so the
+  schema change rebinds nothing.
+
 ## [Unreleased] — 0.95.0
 
 ### Changed

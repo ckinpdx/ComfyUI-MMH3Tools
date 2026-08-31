@@ -62,19 +62,77 @@ _FRAMES = {}
 _FRAMES_LOCK = threading.Lock()
 
 
-class _PreviewRegistration:
-    """A pass-through OUTER_SAMPLE wrapper whose only job is to carry config.
+def _suppress_default_previews():
+    """Silence core's own previewer for the duration of a sample; returns a restore.
 
-    Forwards to the next executor verbatim, so registering one cannot change a
-    render -- which is the whole premise of discovering the preview rather than
-    building it into the sampler.
+    Without this the sampler node keeps drawing its own latent preview alongside
+    this node's, which is the thing that made the two look like duplicates. Every
+    CONCRETE subclass is patched, not just the base: VHS wraps LatentPreviewer and
+    would otherwise carry on emitting.
+    """
+    import latent_preview
+    saved = []
+    stack = [latent_preview.LatentPreviewer]
+    while stack:
+        cls = stack.pop()
+        stack.extend(cls.__subclasses__())
+        if "decode_latent_to_preview_image" in cls.__dict__:
+            saved.append((cls, cls.__dict__["decode_latent_to_preview_image"]))
+            cls.decode_latent_to_preview_image = lambda self, *a, **k: None
+
+    def restore():
+        for cls, method in saved:
+            cls.decode_latent_to_preview_image = method
+    return restore
+
+
+class _PreviewRegistration:
+    """The OUTER_SAMPLE wrapper: carries config, and hooks the per-step callback.
+
+    A chunked render is watched STEP by step, not chunk by chunk -- finding out a
+    chunk was wrong only once it is finished is finding out too late. Core hands
+    this wrapper the sampler's `callback` as positional arg 5
+    (`executor.execute(noise, latent_image, sampler, sigmas, denoise_mask, callback,
+    disable_pbar, seed, latent_shapes=...)`), and the callback is
+    `(step, x0, x, total_steps)` -- so x0, the denoised prediction, is reachable on
+    every step. Wrapping it is the only change; the original is always called.
     """
 
     def __init__(self, config):
         self.config = dict(config)
+        self.session = None
 
     def __call__(self, executor, *args, **kwargs):
-        return executor(*args, **kwargs)
+        session = self.session
+        if session is None or not session.enabled:
+            return executor(*args, **kwargs)
+
+        args = list(args)
+        original = args[5] if len(args) > 5 else None
+
+        def callback(step, x0, x, total_steps):
+            try:
+                session.step(step, total_steps, x0)
+            except Exception as error:                   # never break a render
+                session.enabled = False
+                logging.warning("[MMH3LivePreview] disabled after an error: %s", error)
+            if original is not None:
+                return original(step, x0, x, total_steps)
+
+        if len(args) > 5:
+            args[5] = callback
+        restore = None
+        try:
+            if session.suppress_default:
+                restore = _suppress_default_previews()
+        except Exception as error:
+            logging.info("[MMH3LivePreview] could not suppress the default preview: %s",
+                         error)
+        try:
+            return executor(*args, **kwargs)
+        finally:
+            if restore is not None:
+                restore()
 
 
 def _wrappers_slot():
@@ -140,20 +198,62 @@ class PreviewSession:
         self.height = int(config.get("height", 96))
         self.quality = int(config.get("quality", 80))
         self.node_id = config.get("node_id")
+        self.vae = config.get("vae")
+        self.suppress_default = bool(config.get("suppress_default", True))
         self.enabled = self.node_id is not None
         self.chunk_count = int(chunk_count)
         self.tiles = []
         self.labels = []
+        # the chunk being sampled RIGHT NOW, and its live frame
+        self.current = None
+        self.live = None
+        self.live_label = ""
         if self.node_id is not None:
             with _FRAMES_LOCK:
                 _FRAMES.pop(str(self.node_id), None)
+
+    def set_chunk(self, index, v0, v1):
+        """Called before a chunk starts, so the live frame can name itself."""
+        self.current = (int(index), int(v0), int(v1))
+
+    def step(self, step, total_steps, x0):
+        """Per SAMPLING STEP. x0 is the denoised prediction, which is the whole
+        point: a chunk that has gone wrong is visible at step 2, not after it has
+        been paid for in full."""
+        if not self.enabled or x0 is None:
+            return
+        video = x0.unbind()[0] if getattr(x0, "is_nested", False) else x0
+        rgb = self._render(video)
+        if rgb is None:
+            return
+        self.live = rgb[rgb.shape[0] // 2]
+        i, v0, v1 = self.current if self.current else (0, 0, 0)
+        self.live_label = "chunk %d  step %d/%d" % (i, int(step) + 1, int(total_steps))
+        self._send()
+
+    def _render(self, video):
+        """A [T,H,W,3] preview of a video latent, by VAE if one is wired."""
+        if self.vae is not None:
+            try:
+                lat = video if video.ndim == 5 else video.unsqueeze(0)
+                out = self.vae.decode(lat)
+                if out.ndim == 5:
+                    out = out[0]
+                return out.detach().to(dtype=torch.float32, device="cpu").clamp(0, 1)
+            except Exception as error:
+                # One failure is enough; falling back keeps the preview alive rather
+                # than turning a diagnostic into a second thing to debug.
+                logging.info("[MMH3LivePreview] VAE decode failed (%s); falling back "
+                             "to latent_rgb_factors for the rest of the run", error)
+                self.vae = None
+        return _to_rgb(video)
 
     def chunk(self, index, video_latent, v0, v1):
         """Called with a finished chunk's latent. Never raises into the sampler."""
         if not self.enabled:
             return
         try:
-            rgb = _to_rgb(video_latent)
+            rgb = self._render(video_latent)
             if rgb is None:
                 self.enabled = False
                 logging.info("[MMH3LivePreview] no usable latent_rgb_factors for this "
@@ -164,6 +264,8 @@ class PreviewSession:
             # largely a strip of the previous chunk.
             mid = rgb.shape[0] // 2
             self.tiles.append(rgb[mid])
+            self.live = None
+            self.live_label = ""
             self.labels.append("%d: %d-%d (%df)"
                                % (index, v0, v1, span_frames(v0, v1)))
             if len(self.tiles) > MAX_STRIP:
@@ -187,7 +289,11 @@ class PreviewSession:
         if server is None:
             self.enabled = False
             return
-        strip = _tile(self.tiles, self.height)[0]            # [3,H,W]
+        # Finished chunks, then the one being sampled right now on the end.
+        shown = list(self.tiles) + ([self.live] if self.live is not None else [])
+        if not shown:
+            return
+        strip = _tile(shown, self.height)[0]                  # [3,H,W]
         arr = (strip.permute(1, 2, 0).numpy() * 255.0).astype("uint8")
         image = Image.fromarray(arr)
         buf = pyio.BytesIO()
@@ -201,6 +307,7 @@ class PreviewSession:
             "chunks": len(self.tiles),
             "total": self.chunk_count,
             "labels": list(self.labels),
+            "live": self.live_label,
         }, server.client_id)
 
 
@@ -216,7 +323,11 @@ def begin_preview(model_patcher, chunk_count):
         return None
     for entry in wrappers or ():
         if isinstance(entry, _PreviewRegistration):
-            return PreviewSession(entry.config, chunk_count)
+            # The wrapper reads the session off the registration, because the
+            # per-step callback lives in the wrapper while the chunk loop lives in
+            # the sampler. One object, both ends.
+            entry.session = PreviewSession(entry.config, chunk_count)
+            return entry.session
     return None
 
 
@@ -260,13 +371,29 @@ class MMH3LivePreview(io.ComfyNode):
                     "jpeg_quality", default=80, min=30, max=100, step=1, optional=True,
                     tooltip="Quality of the preview transport only. Nothing here "
                             "reaches the render."),
+                io.Boolean.Input(
+                    "suppress_sampler_preview", default=True, optional=True,
+                    tooltip="Silence ComfyUI's own latent preview on the sampler node "
+                            "while this runs, so the two do not draw the same thing "
+                            "twice. Restored when the sample ends."),
+                io.Vae.Input(
+                    "vae", optional=True,
+                    tooltip="Optional true-colour decode. Wire a stock VAE Loader "
+                            "at a TINY H3 decoder -- `taeh3.safetensors` in "
+                            "`models/vae` -- and NOT the full VAE: this runs on "
+                            "every sampling step.\n\n"
+                            "Unwired, the preview uses `latent_rgb_factors`, a 24x3 "
+                            "projection that costs a matmul and is approximate. A "
+                            "decode that fails once falls back to that for the rest of "
+                            "the run rather than failing the render."),
             ],
             outputs=[io.Model.Output(display_name="model")],
             hidden=[io.Hidden.unique_id],
         )
 
     @classmethod
-    def execute(cls, model, tile_height=96, jpeg_quality=80) -> io.NodeOutput:
+    def execute(cls, model, tile_height=96, jpeg_quality=80,
+                suppress_sampler_preview=True, vae=None) -> io.NodeOutput:
         import comfy.latent_formats
         if not getattr(comfy.latent_formats.MiniMaxH3Video, "latent_rgb_factors", None):
             raise ValueError(
@@ -277,9 +404,12 @@ class MMH3LivePreview(io.ComfyNode):
         patched = model.clone()
         patched.add_wrapper_with_key(
             _wrappers_slot(), PREVIEW_KEY,
-            _PreviewRegistration({"height": int(tile_height),
-                                  "quality": int(jpeg_quality),
-                                  "node_id": None if node_id is None else str(node_id)}))
+            _PreviewRegistration({
+                "height": int(tile_height),
+                "quality": int(jpeg_quality),
+                "suppress_default": bool(suppress_sampler_preview),
+                "vae": vae,
+                "node_id": None if node_id is None else str(node_id)}))
         logging.info("[MMH3LivePreview] registered on node %s; tile height %d",
                      node_id, int(tile_height))
         return io.NodeOutput(patched)

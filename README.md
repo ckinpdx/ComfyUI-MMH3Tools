@@ -986,17 +986,36 @@ a choice here — now lives in
   fp32 latent), and `accumulator_device: cpu` hosts the remaining accumulators in
   system RAM, writing window-sized slices across PCIe during the loop and moving
   the fused result back once per step. Values are identical either way.
-- **MMH3 Live Preview** — a filmstrip of the chunks finished so far, pushed while the
-  sampler is still running. Wire it between the model and whatever builds the guider;
+- **MMH3 Live Preview** — the chunk being sampled, updated **every step**, with the
+  finished chunks banked as a filmstrip behind it. Wire it between the model and whatever builds the guider;
   it passes the model through unchanged and only registers itself.
 
   A chunked render is where a progress bar tells you least: it says step 34 of 160 and
   nothing about whether the shots are the right ones in the right order. Each chunk's
   latent is in hand the moment it is written back, and was being thrown away.
 
-  One tile per finished chunk, taken from the **middle** of the chunk — a chunk's
-  opening latents are the carry from the one before it, so a strip of first frames
-  would largely show the previous chunk. The last 16 are kept.
+  **Per step, not per chunk.** Core hands the wrapper the sampler's `callback` as
+  positional arg 5, and that callback is `(step, x0, x, total_steps)` — so `x0`, the
+  denoised prediction, is in hand on every step. A chunk that has gone wrong shows at
+  step 2 rather than after it has been paid for in full. The original callback is
+  always called; wrapping it is the only change.
+
+  The strip reads left to right: finished chunks, then the one being sampled now on the
+  end. Banked tiles come from the **middle** of their chunk — a chunk's opening latents
+  are the carry from the one before it, so a strip of first frames would largely show
+  the previous chunk. The last 16 are kept.
+
+  **`suppress_sampler_preview`** (on) silences ComfyUI's own latent preview for the
+  duration of the sample, so the sampler node and this one do not draw the same thing
+  twice. Every *concrete* `decode_latent_to_preview_image` under `LatentPreviewer` is
+  patched, not just the base — VHS subclasses it and would otherwise carry on — and all
+  of them are restored when the sample ends.
+
+  **`vae`** is optional and gives a true-colour decode instead of the projection. Wire
+  a stock **VAE Loader** at **`taeh3.safetensors`** in `models/vae` — a tiny H3 decoder,
+  24 latent channels, 16× spatial — and **not** the full VAE, because this runs on every
+  step. A decode that fails once falls back to `latent_rgb_factors` for the rest of the
+  run rather than turning a diagnostic into a second thing to debug.
 
   The decode is `latent_rgb_factors`, a 24×3 projection: no model file, no VAE, no
   download, one matmul. It is an **approximation** — colour is indicative, fine detail

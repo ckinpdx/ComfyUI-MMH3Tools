@@ -9,6 +9,43 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.94.0
+
+### Changed
+
+- **The live preview updates every STEP, not every chunk.** Per-chunk was the wrong
+  granularity and defeated the point: you found out a chunk was wrong only once it had
+  been paid for in full. The wrapper now wraps the sampler's `callback` — core passes it
+  as positional arg 5 of the `OUTER_SAMPLE` executor, and it is
+  `(step, x0, x, total_steps)`, so the denoised prediction is available on every step.
+  The original callback is always called; wrapping is the only change.
+
+  The sampler tells the session which chunk is starting (`set_chunk`) BEFORE sampling
+  it, since the callback fires during. The strip now shows finished chunks with the one
+  currently sampling on the end, and the caption leads with `chunk 2  step 7/20` while
+  a chunk is live.
+
+### Added
+
+- **`suppress_sampler_preview` (appended, default on).** Silences ComfyUI's own latent
+  preview for the duration of the sample so the sampler node and this one stop drawing
+  the same thing twice. Every CONCRETE `decode_latent_to_preview_image` under
+  `LatentPreviewer` is patched rather than just the base — VHS subclasses it and would
+  otherwise keep emitting — and every one is restored when the sample ends. Verified
+  both directions: patched while suppressed, identical objects afterwards.
+
+- **`vae` (appended, optional).** A true-colour decode instead of the 24×3 projection.
+  Wire a stock VAE Loader at **`taeh3.safetensors`** in `models/vae` — a tiny H3
+  decoder, 24 latent channels, confirmed loadable by core's ordinary VAE path — and not
+  the full VAE, since this now runs on every step.
+
+  An earlier note in 0.92.0 said no tiny VAE fits H3. That was wrong: it was looked for
+  in `models/vae_approx`, where everything is 4 or 16 channels. `taeh3` lives in
+  `models/vae` and loads through the regular loader.
+
+  A decode that raises disables the VAE path for the rest of the run and falls back to
+  the projection, rather than turning a diagnostic into a second thing to debug.
+
 ## [Unreleased] — 0.93.1
 
 ### Changed

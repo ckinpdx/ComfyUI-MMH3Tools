@@ -881,6 +881,10 @@ class MMH3LoopingSampler(io.ComfyNode):
             # of every chunk whatever prompt happens to be wired to it.
             g2 = None if phase2_guider is None else _chunk_guider(
                 phase2_guider, chunk_cond, frame0=frame_at_latent(v0))
+            if preview is not None:
+                # Before, not after: the per-step callback fires during the sample
+                # and needs to know which chunk it is watching.
+                preview.set_chunk(i, v0, v1)
             done = _run_sampling(
                 _chunk_noise(noise, i), g, sampler, sigmas, chunk,
                 sampling_start_step, sampling_end_step,

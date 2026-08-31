@@ -69,9 +69,13 @@ function draw(node, data) {
         // nothing to revoke, and a dropped frame cannot leak.
         img.src = `data:${data.mime || "image/jpeg"};base64,${data.image}`;
     }
+    // While a chunk is sampling its step counter is the useful number; between
+    // chunks, what was banked is.
     const total = data.total ? ` / ${data.total}` : "";
-    const last = data.labels?.length ? `  last ${data.labels[data.labels.length - 1]}` : "";
-    node._mmh3PreviewCaption.textContent = `chunk ${data.chunks}${total}${last}`;
+    const done = `${data.chunks}${total} done`;
+    node._mmh3PreviewCaption.textContent = data.live
+        ? `${data.live}   (${done})`
+        : (data.labels?.length ? `${done}   last ${data.labels[data.labels.length - 1]}` : done);
     node.setDirtyCanvas(true, false);
 }
 

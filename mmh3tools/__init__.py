@@ -37,7 +37,7 @@ from .nodes_prompt import (
     MMH3ReplaceSection,
     MMH3TaskSystemPrompt,
 )
-from .nodes_preview import MMH3LivePreview
+from .nodes_preview import MMH3GetPreviewFrames, MMH3LivePreview
 from .nodes_refprobe import MMH3RefAttentionMap, MMH3RefAttentionProbe
 from .nodes_scene import (
     MMH3PromptPart,
@@ -87,6 +87,7 @@ NODES = [
     MMH3RefAttentionProbe,
     MMH3RefAttentionMap,
     MMH3LivePreview,
+    MMH3GetPreviewFrames,
     MMH3ChunkScheduleFrames,
     MMH3WindowPlan,
     MMH3KeyframePlanner,

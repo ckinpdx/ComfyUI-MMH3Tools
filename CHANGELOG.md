@@ -9,6 +9,45 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.93.0
+
+### Changed
+
+- **`MMH3LivePreview` now draws on ITS OWN node, not the executing one.** 0.92 used
+  core's `UNENCODED_PREVIEW_IMAGE` channel, which always addresses whichever node is
+  running. That is fine for one preview and fatal for two: a live attention map or an
+  audio strip would overwrite the filmstrip and vice versa, since there is one preview
+  slot per executing node.
+
+  The node now takes its own `unique_id` (`hidden=[io.Hidden.unique_id]`) and sends a
+  custom `mmh3_live_preview` event to a DOM widget, the shape KJNodes'
+  `ModelPreviewOverrideKJ` uses. That is the only route to "put this image on that
+  node" — core has no such call — and it is why the pack now ships a second front-end
+  script, `web/js/mmh3_live_preview.js`.
+
+  The widget is `serialize: false`: it is a view, not state, and saving it would put a
+  base64 JPEG into every workflow file. Frames arrive as `data:` URLs rather than
+  object URLs, so there is no lifetime to manage and a dropped frame cannot leak.
+
+  New `jpeg_quality` input (appended). Transport only — nothing there reaches a render.
+
+  The caption under the strip names the last chunk and its real frame span, computed
+  through `span_frames`, so the grid arithmetic is visible rather than implied.
+
+### Added
+
+- **`MMH3GetPreviewFrames` — "MMH3 Get Preview Frames", `MMH3Tools/sampling`.** The
+  tiles the preview accumulated, as a real IMAGE batch, one frame per chunk in order.
+  A live preview is transient by nature; this is how what it drew survives the run.
+
+  Takes the preview node's MODEL output purely to order itself after the sampler — the
+  model is passed through and never read. Refuses with a message when nothing was
+  recorded, rather than returning an empty batch that fails further downstream.
+
+  The tiles are the same `latent_rgb_factors` approximation at native latent
+  resolution, 1/16 of the render per side. Not a substitute for decoding, and the node
+  says so.
+
 ## [Unreleased] — 0.92.1
 
 ### Fixed

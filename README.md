@@ -985,15 +985,27 @@ a choice here — now lives in
   channel count does not match the format is refused rather than projected, because a
   wrong projection produces a confident meaningless image.
 
-  The image arrives on core's own `UNENCODED_PREVIEW_IMAGE` channel, the one the
-  built-in latent previewer uses, so there is no custom front-end. Any error switches
-  the preview off for the run rather than interrupting it.
+  **The image lands on THIS node, not on the sampler.** Core's preview channel always
+  addresses whichever node is executing, so two live previews overwrite each other —
+  there is one slot per running node. Taking the node's own `unique_id` and sending a
+  custom event to a DOM widget is the only way to keep them separable, which is why
+  the pack ships `web/js/mmh3_live_preview.js`. The widget is `serialize: false`: it
+  is a view, not state, and saving it would put a base64 JPEG in every workflow file.
+
+  Any error switches the preview off for the run rather than interrupting it.
 
   The sampler **discovers** it rather than owning it: `begin_preview` returns `None`
   when nothing is wired, and the sampling path is then byte-identical. The
   wrapper-discovery shape and the FRAME_PER_TOKEN span arithmetic are reimplemented
   from [hradec's ComfyUI-HR-Endless-Sampler](https://github.com/hradec/ComfyUI-HR-Endless-Sampler)
-  (Apache-2.0); no code was copied.
+  (Apache-2.0); the own-node addressing is the shape KJNodes' `ModelPreviewOverrideKJ`
+  uses. No code was copied from either.
+- **MMH3 Get Preview Frames** — the tiles the live preview accumulated, as a real IMAGE
+  batch, one per chunk in order. The strip is transient; this keeps it. Takes the
+  preview's MODEL output purely to order itself after the sampler, and refuses with a
+  message when nothing was recorded rather than handing on an empty batch. Same
+  `latent_rgb_factors` approximation at native latent resolution — 1/16 of the render
+  per side, not a substitute for decoding.
 - **MMH3 Chunk Schedule** — say roughly what you want; get a schedule that actually
   tiles. Solves total, window and overlap **together** and emits frames.
 

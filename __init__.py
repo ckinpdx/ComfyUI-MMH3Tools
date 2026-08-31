@@ -14,8 +14,12 @@ async def comfy_entrypoint() -> MMH3ToolsExtension:
     return MMH3ToolsExtension()
 
 
-# serves web/js/mmh3_dimension_calculator.js, which repopulates the resolution
-# dropdown from /mmh3-dim-calc/resolutions when ratio or orientation changes
+# serves web/js/:
+#   mmh3_dimension_calculator.js -- repopulates the resolution dropdown from
+#     /mmh3-dim-calc/resolutions when ratio or orientation changes
+#   mmh3_live_preview.js -- the DOM widget MMH3 Live Preview draws its filmstrip
+#     on. Needed because core's preview channel always addresses the EXECUTING
+#     node, so previews cannot otherwise be told apart.
 WEB_DIRECTORY = "./web/js"
 
 __all__ = ["comfy_entrypoint", "WEB_DIRECTORY"]

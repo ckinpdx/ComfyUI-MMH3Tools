@@ -9,6 +9,25 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.92.1
+
+### Fixed
+
+- **`MMH3LivePreview` crashed the sampler: `'dict' object is not callable`.** 0.92.0
+  registered a plain config dict in the `OUTER_SAMPLE` wrapper slot, treating it as a
+  registry. Core does not treat it as one — `WrapperExecutor.execute` runs
+  `self.wrappers[self.idx](self, *args, **kwargs)`, so everything in that slot is
+  **called**. The failure landed inside `guider.sample()` on the first chunk, after the
+  run had already started.
+
+  The registration is now `_PreviewRegistration`, a pass-through callable that forwards
+  to the next executor verbatim and carries the config on an attribute. Discovery
+  matches on that type, so a bare dict in the slot is ignored rather than adopted.
+
+  Verified against core's real `WrapperExecutor` rather than a stand-in: the wrapper
+  forwards `(1, b=2)` to the original unchanged, discovery reads the config back, and a
+  dict in the slot yields no session.
+
 ## [Unreleased] — 0.92.0
 
 ### Added

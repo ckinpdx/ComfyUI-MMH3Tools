@@ -37,8 +37,13 @@ from comfy_api.latest import io
 
 from .common import FPS
 
-# comfy.model_patcher wrapper slot. The value stored is a plain config dict; the
-# sampler reads it and never calls it, so this is a registry keyed on the patcher.
+# comfy.model_patcher wrapper slot, used as a registry keyed on the patcher.
+#
+# Core CALLS whatever sits in this slot -- WrapperExecutor.execute does
+# `self.wrappers[self.idx](self, *args, **kwargs)` -- so the value cannot be a bare
+# config dict. Registering one raised `'dict' object is not callable` from inside
+# sampling, after the first chunk had already been queued. It is a pass-through
+# callable that carries the config as an attribute instead.
 PREVIEW_KEY = "mmh3_live_preview"
 
 # The first latent of each group covers one frame, the rest cover four.
@@ -46,6 +51,21 @@ FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
 
 MAX_STRIP = 16          # past this the strip is unreadable at any sane width
 TILE_MIN = 64
+
+
+class _PreviewRegistration:
+    """A pass-through OUTER_SAMPLE wrapper whose only job is to carry config.
+
+    Forwards to the next executor verbatim, so registering one cannot change a
+    render -- which is the whole premise of discovering the preview rather than
+    building it into the sampler.
+    """
+
+    def __init__(self, config):
+        self.config = dict(config)
+
+    def __call__(self, executor, *args, **kwargs):
+        return executor(*args, **kwargs)
 
 
 def _wrappers_slot():
@@ -173,9 +193,9 @@ def begin_preview(model_patcher, chunk_count):
         wrappers = model_patcher.get_wrappers(_wrappers_slot(), PREVIEW_KEY)
     except Exception:
         return None
-    for config in wrappers or ():
-        if isinstance(config, dict):
-            return PreviewSession(config, chunk_count)
+    for entry in wrappers or ():
+        if isinstance(entry, _PreviewRegistration):
+            return PreviewSession(entry.config, chunk_count)
     return None
 
 
@@ -225,7 +245,8 @@ class MMH3LivePreview(io.ComfyNode):
                 "`latent_rgb_factors`, so there is nothing to project the latent "
                 "through. Update ComfyUI, or remove this node.")
         patched = model.clone()
-        patched.add_wrapper_with_key(_wrappers_slot(), PREVIEW_KEY,
-                                     {"height": int(tile_height)})
+        patched.add_wrapper_with_key(
+            _wrappers_slot(), PREVIEW_KEY,
+            _PreviewRegistration({"height": int(tile_height)}))
         logging.info("[MMH3LivePreview] registered; tile height %d", int(tile_height))
         return io.NodeOutput(patched)

@@ -1187,8 +1187,21 @@ a choice here — now lives in
   recording that does not exist yet, and its output would cache against widget values
   that never change. Feed the latent on to whatever decodes or saves.
 
-  Then read it: one row per reference, time along x. It chains any existing attention
-  override, so it coexists with Sol-Attn.
+  Then read it: one band per reference, **named in the gutter**, with a **time ruler in
+  seconds** underneath taken from the latent's own length on the real frame grid. It
+  chains any existing attention override, so it coexists with Sol-Attn.
+
+  **The colour is stretched over the data's own range, and the report says what that
+  range was.** Raw attention mass is not a 0–1 quantity — a single reference on a long
+  clip sits around 0.02–0.11, which against a 0–1 ramp renders as flat dark blue with a
+  5× variation completely invisible. Scaling is across the whole map rather than per
+  band, so references stay comparable.
+
+  **The report gives the denominator too.** A mean of 0.039 means nothing alone; what it
+  has to be read against is the reference's share of the sequence, because attention
+  equal to that share is indifference. So each reference prints its key rows, that share,
+  and the ratio — `1008 of 37632 key rows (2.68%) — uniform attention would give 0.0268,
+  measured 1.46x that`.
 
   **It judges per moment, never on the time average.** Under a working binding — one
   reference leading while speaker A talks, the other while B talks — the two averages

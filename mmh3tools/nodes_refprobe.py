@@ -46,12 +46,12 @@ _PATCHED = set()
 # Accumulates across every recorded call. Written during sampling, read afterwards by
 # MMH3RefAttentionMap, because the probe has nowhere to return an image from.
 _RECORD = {"mass": None, "hits": 0, "labels": [], "query": "", "calls": 0,
-           "layers": set(), "note": ""}
+           "layers": set(), "note": "", "ref_rows": [], "total_rows": 0}
 
 
 def reset_record():
     _RECORD.update({"mass": None, "hits": 0, "labels": [], "query": "", "calls": 0,
-                    "layers": set(), "note": ""})
+                    "layers": set(), "note": "", "ref_rows": [], "total_rows": 0})
 
 
 def _patch_packed_layout():
@@ -287,6 +287,11 @@ def _record(q, k, heads, skip_reshape, topts, scale, block):
         _RECORD["mass"] = prev + mass.cpu()
         _RECORD["hits"] += 1
     _RECORD["labels"] = labels
+    # Key rows per reference and in total: without them a mean of 0.039 cannot be
+    # read at all. The number to compare against is the share of the sequence the
+    # reference occupies -- attention at that share is chance, above it is interest.
+    _RECORD["ref_rows"] = [int(b) - int(a) for a, b in refs]
+    _RECORD["total_rows"] = int(kb.shape[-2])
     _RECORD["calls"] += 1
     if block is not None:
         _RECORD["layers"].add(int(block))
@@ -299,6 +304,81 @@ def _ramp(v):
     g = (v * 1.8 - 0.1).clamp(0, 1)
     b = (0.45 - v * 1.2).clamp(0, 1) + (v < 0.02).float() * 0.10
     return torch.stack([r, g, b], dim=-1)
+
+
+# The real grid: the first latent of each group stands for ONE frame, the rest
+# for four. A ruler drawn from T*4 would put every tick in the wrong place.
+FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
+
+GUTTER = 132        # room for a reference name at the default 64px band height
+AXIS = 20           # room for the time ruler
+
+
+def _clip_seconds(latent):
+    """Seconds of clip, from the latent this node is passed. 0 when unknown.
+
+    The latent is here to order the node after the sampler; reading its length is
+    the second thing it buys. Frames come off the real grid rather than T*4, so a
+    ruler drawn from it lands where the footage actually is.
+    """
+    try:
+        x = latent["samples"] if isinstance(latent, dict) else latent
+        t = int(x.shape[2]) if getattr(x, "ndim", 0) == 5 else 0
+    except Exception:
+        return 0.0
+    if t <= 0:
+        return 0.0
+    frames = sum(FRAME_PER_TOKEN[i % len(FRAME_PER_TOKEN)] for i in range(t))
+    return frames / 24.0
+
+
+def _ticks(seconds):
+    """Tick positions as (fraction, text), at a round interval for the duration."""
+    if seconds <= 0:
+        return [(i / 4.0, "%d%%" % (i * 25)) for i in range(5)]
+    for step in (1, 2, 5, 10, 15, 30, 60, 120):
+        if seconds / step <= 10:
+            break
+    out, t = [], 0.0
+    while t <= seconds + 1e-6:
+        out.append((t / seconds, "%gs" % round(t, 2)))
+        t += step
+    return out
+
+
+def _annotate(rgb, labels, height, seconds):
+    """Bands -> a readable figure: names down the side, a time ruler underneath.
+
+    An unlabelled stripe is not a diagnostic. Drawn with PIL's default bitmap font
+    so it needs no font file and renders identically everywhere.
+    """
+    try:
+        import numpy as np
+        from PIL import Image, ImageDraw
+    except Exception:
+        return rgb
+    h, w = int(rgb.shape[0]), int(rgb.shape[1])
+    canvas = Image.new("RGB", (GUTTER + w, h + AXIS), (18, 18, 20))
+    band = Image.fromarray((rgb.clamp(0, 1).numpy() * 255).astype("uint8"))
+    canvas.paste(band, (GUTTER, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    for i, name in enumerate(labels):
+        y = i * height + max(0, height // 2 - 4)
+        draw.text((6, y), str(name)[:20], fill=(220, 220, 225))
+        if i:
+            draw.line([(GUTTER, i * height), (GUTTER + w, i * height)], fill=(60, 60, 66))
+
+    draw.line([(GUTTER, h), (GUTTER + w, h)], fill=(90, 90, 96))
+    for frac, text in _ticks(seconds):
+        x = GUTTER + min(w - 1, int(round(frac * (w - 1))))
+        draw.line([(x, h), (x, h + 4)], fill=(140, 140, 148))
+        draw.text((min(GUTTER + w - 26, max(GUTTER, x - 8)), h + 6), text,
+                  fill=(150, 150, 158))
+    if seconds <= 0:
+        draw.text((6, h + 6), "clip", fill=(110, 110, 118))
+
+    return torch.from_numpy(np.asarray(canvas).astype("float32") / 255.0)
 
 
 class MMH3RefAttentionMap(io.ComfyNode):
@@ -370,13 +450,24 @@ class MMH3RefAttentionMap(io.ComfyNode):
         if normalize_columns:
             shown = m / m.sum(dim=0, keepdim=True).clamp_min(1e-6)
 
+        # AUTO-SCALE. `_ramp` spans 0..1, and raw attention mass does not: a single
+        # reference on a long clip sits around 0.02-0.11, which renders as flat dark
+        # blue with a 5x variation completely invisible. The colours are stretched
+        # over the data's OWN range instead, across the whole map rather than per row
+        # so references stay comparable, and the mapping is stated in the report
+        # because a scale nobody can see is a scale nobody can trust.
+        lo = float(shown.min())
+        hi = float(shown.max())
+        span = hi - lo
+        scaled = (shown - lo) / span if span > 1e-9 else shown * 0.0 + 0.5
+
         img = torch.nn.functional.interpolate(
-            shown[None, None], size=(m.shape[0], width), mode="nearest")[0, 0]
+            scaled[None, None], size=(m.shape[0], width), mode="nearest")[0, 0]
         rgb = _ramp(img).repeat_interleave(height, dim=0)     # [refs*height, width, 3]
         # a dark rule between bands so adjacent references are distinguishable
         for i in range(1, m.shape[0]):
             rgb[i * height - 1] = 0.12
-        out = rgb[None]
+        out = _annotate(rgb, labels, height, _clip_seconds(latent))[None]
 
         lines = ["MMH3 Reference Attention Map -- %d attention calls over %d block(s)"
                  % (_RECORD["calls"], len(_RECORD["layers"]) or 0), ""]
@@ -387,12 +478,28 @@ class MMH3RefAttentionMap(io.ComfyNode):
             lines.append("  DiT blocks recorded: %s" % (
                 "%d-%d" % (ls[0], ls[-1]) if len(ls) > 3 else ls))
         lines.append("")
+        secs = _clip_seconds(latent)
+        lines.append("  colour spans %.4f (darkest) to %.4f (brightest) -- stretched "
+                     "over the data's own range, not 0-1" % (lo, hi))
+        if secs > 0:
+            lines.append("  time axis: %.2fs of clip across the width" % secs)
+        lines.append("")
         lines.append("  mean attention mass per reference, over the whole clip")
+        rows = _RECORD.get("ref_rows") or []
+        total_rows = int(_RECORD.get("total_rows") or 0)
         order = torch.argsort(m.mean(dim=1), descending=True)
         for i in order.tolist():
             row = m[i]
             lines.append("    %-12s mean %.4f   min %.4f   max %.4f"
                          % (labels[i], row.mean(), row.min(), row.max()))
+            # The denominator. Attention equal to the reference's share of the
+            # sequence is what indifference looks like; the ratio is the reading.
+            if i < len(rows) and total_rows > 0:
+                share = rows[i] / float(total_rows)
+                lines.append("    %-12s %d of %d key rows (%.2f%%) -- uniform "
+                             "attention would give %.4f, measured %.2fx that"
+                             % ("", rows[i], total_rows, share * 100.0, share,
+                                float(row.mean()) / share if share > 0 else 0.0))
         total = float(m.sum(dim=0).mean())
         lines.append("")
         lines.append("  references together take %.1f%% of the row on average; the "

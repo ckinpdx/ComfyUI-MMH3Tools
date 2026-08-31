@@ -9,6 +9,43 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.96.0
+
+### Fixed
+
+- **The heatmap was unreadable in its own recommended configuration.** `_ramp` spans
+  0–1 and raw attention mass does not: a single reference on a long clip sits around
+  0.02–0.11, so the whole image rendered as flat dark blue. Working it through on a real
+  report — mean 0.0392, min 0.0235, max 0.1127 — the band went from RGB(0, 0, 0.40) to
+  RGB(0, 0.10, 0.32). A 4.8× variation, invisible.
+
+  The ramp was written for `normalize_columns=True`, where values sum to 1 across
+  references. But the tooltip tells you to leave normalization OFF for the first look,
+  so the recommended setting was the broken one.
+
+  Colour is now stretched over the data's own range — across the whole map, not per
+  band, so references stay comparable — and the report states the mapping, because a
+  scale nobody can see is a scale nobody can trust.
+
+### Added
+
+- **The heatmap is labelled.** Reference names down a gutter, and a time ruler in
+  seconds along the bottom, its duration taken from the latent's own length via the real
+  `(1,4,4,4,4)` grid rather than `T*4`. An unlabelled stripe is not a diagnostic. Drawn
+  with PIL's default bitmap font, so no font file is needed; if PIL is unavailable the
+  bare bands are returned rather than failing.
+
+  This is the second thing the pass-through latent buys, after ordering.
+
+- **The report gives the denominator.** The probe now records each reference's key-row
+  count and the total sequence length, so a mean has something to be measured against:
+  attention equal to a reference's share of the sequence is indifference, above it is
+  interest. Each reference prints its rows, that share, and the ratio.
+
+  Without it a mean of 0.039 is unreadable — at a 2.7% share it means the model is
+  attending 1.5× above chance; at a 10% share it would mean the reference is being
+  ignored. Same number, opposite conclusions.
+
 ## [Unreleased] — 0.95.1
 
 ### Fixed

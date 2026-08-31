@@ -9,6 +9,33 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.93.1
+
+### Changed
+
+- **A reference video's grid trim and coverage gap are now reported.** Behaviour is
+  unchanged; what changed is that it stops being silent.
+
+  A reference has to land on the 17j+5 grid and gets there by counting **down**, so up
+  to 16 frames are discarded from the **tail** — a 100-frame reference becomes 90 — and
+  nothing pads them back. Combined with a reference shorter than the render, the end of
+  the clip has no reference at all and is filled from the prompt, which reads in the
+  output as the model ignoring the reference near the end. Reported by ucren
+  (2026-08-31), who had diagnosed the symptom and reasonably assumed there was padding
+  involved.
+
+  The node now logs the trim with both counts, and warns with the exact number of
+  unconditioned frames when the reference covers less than the target: on a 192-frame
+  render a 100-frame reference covers **47%**, leaving 102 frames with nothing to
+  follow. Windowed references mostly escape it, since `_plan`'s spans are already
+  grid-aligned (158 % 17 == 5); an arbitrary-length whole-clip reference is the exposed
+  case.
+
+  **Padding was considered and rejected.** Black or a held last frame would assert
+  content the user never supplied — telling the model the scene goes dark or freezes —
+  which is worse than having no reference there. The behaviour is right; only the
+  silence was wrong.
+
 ## [Unreleased] — 0.93.0
 
 ### Changed

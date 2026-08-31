@@ -337,14 +337,39 @@ def _build_refs(vae, audio_vae, width, height, frame_count, ref_image_size,
             cw = max(CANVAS_MULTIPLE, round(vw / CANVAS_MULTIPLE) * CANVAS_MULTIPLE)
             ch = max(CANVAS_MULTIPLE, round(vh / CANVAS_MULTIPLE) * CANVAS_MULTIPLE)
         frames = _resize(video_frames, cw, ch, "disabled")
+        # What this reference is supposed to cover: its own window when windowing,
+        # otherwise the whole clip.
+        target = int(frame_count) if ref_window is None else (
+            ref_window[1] - ref_window[0] + 1)
         if frames.shape[0] > frame_count:
             frames = frames[:frame_count]
         n = frames.shape[0]
         if n < 5:
             raise ValueError("MiniMax H3 reference videos need at least 5 frames (~0.2s at 24 fps)")
+        # Down to the 17j+5 grid. Counting DOWN discards up to 16 frames off the
+        # TAIL -- and nothing pads them back, because a reference is never padded:
+        # inventing black or a held frame would assert content the user did not
+        # supply, which is worse than the model having no reference there. So the
+        # cost is reported instead.
+        before_grid = n
         while n % 17 != 5:
             n -= 1
         frames = frames[:n]
+        grid_dropped = before_grid - n
+        if grid_dropped:
+            logging.info("[MMH3ReferenceMultiPrompt] %s: %d frames -> %d on the 17j+5 "
+                         "grid, %d dropped from the TAIL (references are trimmed down, "
+                         "never padded)", name, before_grid, n, grid_dropped)
+        if target > 0 and n < target:
+            logging.warning(
+                "[MMH3ReferenceMultiPrompt] %s covers %d of %d frames (%.0f%%) -- the "
+                "last %d frames have NO reference and the model fills them from the "
+                "prompt alone, which reads as it ignoring the reference near the end. "
+                "%sMake the reference at least as long as the target, or land it on "
+                "the 17j+5 grid.",
+                name, n, target, 100.0 * n / target, target - n,
+                "%d of those came from the grid trim. " % grid_dropped
+                if grid_dropped else "")
         z = vae.encode(frames)
         audio_latent, ref_audio_t = (None, 0)
         if soundtrack is not None:

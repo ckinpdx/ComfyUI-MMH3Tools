@@ -393,6 +393,25 @@ for any node is in its tooltip.
   exactly two inputs, so N references need N-1 chained nodes. Either way the node logs each reference's incoming and resolved size, and
   says so when a multi-image batch arrives.
 
+  **A reference video is NEVER padded, and its tail is trimmed to the grid.** It has to
+  land on 17j+5, and it gets there by counting **down** — so up to **16 frames are
+  discarded from the end**, and nothing puts them back. A 100-frame reference becomes
+  90. Padding was considered and rejected: black or a held last frame would assert
+  content you never supplied, which is worse than the model simply having no reference
+  there.
+
+  What that costs is now **reported** rather than silent. The node logs the grid trim
+  with both counts, and warns when the reference covers less of the target than the
+  target is long — naming the exact number of frames left unconditioned. That tail is
+  filled from the prompt alone, which reads as the model ignoring your reference near
+  the end of a clip. On a 192-frame render a 100-frame reference covers **47%**, and
+  102 frames have nothing to follow.
+
+  Windowed references usually escape this: the spans `_plan` produces are already
+  grid-aligned (a 47-latent window is 158 frames, and 158 % 17 == 5). An
+  arbitrary-length whole-clip reference is the exposed case. Make it at least as long
+  as the target, or land it on the grid.
+
   **`window_ref_video` cuts the reference video to each chunk's own span.** Off by
   default and byte-identical when off. On, the node encodes one reference set per
   chunk instead of one for the sequence, so chunk *i* is conditioned on the footage it

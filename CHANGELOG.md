@@ -9,6 +9,42 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.95.0
+
+### Changed
+
+- **The preview is an animated timeline that plays at real time, extended per chunk.**
+  0.94's per-step still was the wrong thing: what a chunked render needs is to be
+  *watched*, and a frozen frame says nothing about pacing. Each finished chunk is now
+  decoded and appended, and the widget shows the whole piece so far as an animated WebP
+  at **24 fps**.
+
+  `frame_stride` (default 3) is fidelity, not speed — every Nth frame kept, each held N
+  times as long, so playback stays real time at a third of the encode. Measured: a
+  12-latent chunk is 39 real frames; at stride 1 that plays in 1.64 s and at stride 3 in
+  1.62 s, against 1.62 s of real footage.
+
+  **The slicing this replaced was wrong, and it is worth recording why.** Decoding a
+  chunk as a series of grid-valid slices looks safe and is not: the grid does not
+  compose additively, 7 latents give 22 frames and 2 give 5, so a 12-latent chunk tiled
+  that way produced 12 frames where one decode gives 39 — playback at **half speed**,
+  which is precisely the fault this preview exists to reveal. Chunks arrive
+  grid-aligned from `_plan`, so a single whole-chunk decode is valid by construction.
+
+  `max_decode_latents` (22) bounds it instead: a longer chunk decodes a grid-valid
+  PREFIX rather than being sliced, because the decode materialises at render resolution
+  before being scaled down and 47 latents of 1344×768 is ~1.9 GB in fp32.
+
+  `max_frames` (480) caps the timeline with a moving window.
+
+  `live_steps` (default off) keeps the per-step still from 0.94, and stops sending once
+  the timeline exists — otherwise every step would re-encode the whole animation.
+
+### Added
+
+- **`fps`, `frame_stride`, `max_frames`, `live_steps` inputs** (appended). `fps` 24 is
+  H3's own rate and means real-time playback.
+
 ## [Unreleased] — 0.94.0
 
 ### Changed

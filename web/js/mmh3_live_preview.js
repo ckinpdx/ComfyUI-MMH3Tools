@@ -72,10 +72,13 @@ function draw(node, data) {
     // While a chunk is sampling its step counter is the useful number; between
     // chunks, what was banked is.
     const total = data.total ? ` / ${data.total}` : "";
-    const done = `${data.chunks}${total} done`;
+    const done = `${data.chunks}${total} chunks`;
+    // Seconds is the number worth showing: the timeline plays at real time, so it
+    // is how much of the piece exists so far.
+    const secs = data.seconds ? `  ${data.seconds}s` : "";
     node._mmh3PreviewCaption.textContent = data.live
         ? `${data.live}   (${done})`
-        : (data.labels?.length ? `${done}   last ${data.labels[data.labels.length - 1]}` : done);
+        : `${done}${secs}${data.frames ? `  ${data.frames}f` : ""}`;
     node.setDirtyCanvas(true, false);
 }
 

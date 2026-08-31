@@ -986,24 +986,37 @@ a choice here — now lives in
   fp32 latent), and `accumulator_device: cpu` hosts the remaining accumulators in
   system RAM, writing window-sized slices across PCIe during the loop and moving
   the fused result back once per step. Values are identical either way.
-- **MMH3 Live Preview** — the chunk being sampled, updated **every step**, with the
-  finished chunks banked as a filmstrip behind it. Wire it between the model and whatever builds the guider;
+- **MMH3 Live Preview** — the timeline so far, **playing at real time**, extended
+  each time a chunk finishes. Wire it between the model and whatever builds the guider;
   it passes the model through unchanged and only registers itself.
 
   A chunked render is where a progress bar tells you least: it says step 34 of 160 and
   nothing about whether the shots are the right ones in the right order. Each chunk's
   latent is in hand the moment it is written back, and was being thrown away.
 
-  **Per step, not per chunk.** Core hands the wrapper the sampler's `callback` as
-  positional arg 5, and that callback is `(step, x0, x, total_steps)` — so `x0`, the
-  denoised prediction, is in hand on every step. A chunk that has gone wrong shows at
-  step 2 rather than after it has been paid for in full. The original callback is
-  always called; wrapping it is the only change.
+  Each finished chunk is decoded and appended, and what you get is an **animated
+  timeline of the piece so far, played at 24 fps** — real time, which is the only
+  setting that says anything about pacing. `frame_stride` is a fidelity dial, not a
+  speed one: at 3 you keep a third of the frames and hold each three times as long, so
+  the clip still runs at real time for a third of the encode.
 
-  The strip reads left to right: finished chunks, then the one being sampled now on the
-  end. Banked tiles come from the **middle** of their chunk — a chunk's opening latents
-  are the carry from the one before it, so a strip of first frames would largely show
-  the previous chunk. The last 16 are kept.
+  **One decode per chunk, never sliced.** The temporal grid does not compose
+  additively — 7 latents decode to 22 frames and 2 decode to 5 — so tiling a 12-latent
+  chunk out of grid-valid slices yields 12 frames where a single decode yields 39.
+  Slicing was built, measured at **half speed**, and removed. Chunks arrive
+  grid-aligned from `_plan`, so a whole-chunk decode is valid by construction; a very
+  long chunk decodes a grid-valid **prefix** instead (`max_decode_latents`, default 22
+  → 73 frames), because a whole chunk materialises at render resolution before it is
+  scaled down and 47 latents of 1344×768 is ~1.9 GB in fp32.
+
+  `max_frames` caps the timeline, dropping the oldest, so a long render keeps a moving
+  window rather than an animation that grows without limit.
+
+  **`live_steps`** (off) additionally pushes a still of the chunk being sampled on every
+  step, from the `x0` core hands the wrapper as positional arg 5 of the sampler
+  callback. Off by default because it replaces the playing timeline with a frozen
+  frame, and it stops sending once the timeline exists — otherwise every step would
+  re-encode the whole animation.
 
   **`suppress_sampler_preview`** (on) silences ComfyUI's own latent preview for the
   duration of the sample, so the sampler node and this one do not draw the same thing

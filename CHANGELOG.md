@@ -9,6 +9,27 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.97.1
+
+### Changed
+
+- **`MMH3_Looping_I2V_ManualPrompt.json` replaced with the working copy: 61 nodes to
+  90.** It has stopped being the minimal graph and become the worked example of how
+  things get loaded — **MMH3 Embedding Select**, **MMH3 Image List**, **MMH3 Keyframe
+  Planner**, the **Reference Attention Probe/Map** and a latent-upscale branch now sit
+  alongside the three-stage ladder.
+
+  Still no LLM in it, which is what separates it from the PromptBuilding graph.
+
+  **New third-party expectations:** KJNodes (`VAELoaderKJ`, `ResizeImageMaskNode`,
+  `BatchImagesNode`), VideoHelperSuite, rgthree, and — for the upscale branch only —
+  [Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler).
+  That last one is not core and not this pack; the branch will not load without it.
+
+  Link integrity swept before writing: 90 nodes, 158 links, nothing dangling. Model
+  choices came with it — `minimax_h3_fl2va_pruned_bf16` on the UNET loader and
+  `minimax_h3_turbo_v4_step600_ema_pruned_comfyui` at strength 0.5 on the LoRA.
+
 ## [Unreleased] — 0.97.0
 
 ### Changed

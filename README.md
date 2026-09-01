@@ -169,8 +169,18 @@ sampler, finishing on a chunked pixel-upscale ladder.
 image-to-video start with the prompt **typed, not generated**: no LLM anywhere in the
 graph, just a `PrimitiveStringMultiline` feeding **MMH3 Reference MultiPrompt**. It also
 carries **MMH3 Timeline Preview**, sitting after the LoRA so every guider in the graph
-inherits it — the generate pass and both refines each push their own filmstrip. Use it
+inherits it — the generate pass and both refines each push their own timeline. Use it
 when you already know the shot and want the prompt-building half out of the way.
+
+It is now the **kitchen-sink example** rather than the minimal one: 90 nodes, wiring up
+**MMH3 Embedding Select**, **MMH3 Image List**, **MMH3 Keyframe Planner** and the
+**Reference Attention Probe/Map** alongside the ladder, so each has a worked example of
+how it is loaded. It expects **KJNodes**, **VideoHelperSuite** and **rgthree**, and the
+latent-upscale branch expects the third-party
+[Comfyui_Minimax_h3_latent_Upscaler](https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler)
+— that branch is the only part that will not load without it. There is still **no LLM
+anywhere in the graph**, which is the thing that separates it from the PromptBuilding
+one.
 
 It is also the fullest example of the **three-stage ladder**. One looping sampler
 generates at 192-frame chunks, then two more refine passes each sit behind their own

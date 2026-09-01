@@ -168,7 +168,7 @@ sampler, finishing on a chunked pixel-upscale ladder.
 [`workflows/MMH3_Looping_I2V_ManualPrompt.json`](workflows/) — the same
 image-to-video start with the prompt **typed, not generated**: no LLM anywhere in the
 graph, just a `PrimitiveStringMultiline` feeding **MMH3 Reference MultiPrompt**. It also
-carries **MMH3 Live Preview**, sitting after the LoRA so every guider in the graph
+carries **MMH3 Timeline Preview**, sitting after the LoRA so every guider in the graph
 inherits it — the generate pass and both refines each push their own filmstrip. Use it
 when you already know the shot and want the prompt-building half out of the way.
 
@@ -986,7 +986,7 @@ a choice here — now lives in
   fp32 latent), and `accumulator_device: cpu` hosts the remaining accumulators in
   system RAM, writing window-sized slices across PCIe during the loop and moving
   the fused result back once per step. Values are identical either way.
-- **MMH3 Live Preview** — the timeline so far, **playing at real time**, extended
+- **MMH3 Timeline Preview** — the timeline so far, **playing at real time**, extended
   each time a chunk finishes. Wire it between the model and whatever builds the guider;
   it passes the model through unchanged and only registers itself.
 
@@ -1051,7 +1051,7 @@ a choice here — now lives in
   from [hradec's ComfyUI-HR-Endless-Sampler](https://github.com/hradec/ComfyUI-HR-Endless-Sampler)
   (Apache-2.0); the own-node addressing is the shape KJNodes' `ModelPreviewOverrideKJ`
   uses. No code was copied from either.
-- **MMH3 Get Preview Frames** — the tiles the live preview accumulated, as a real IMAGE
+- **MMH3 Get Timeline Frames** — the tiles the live preview accumulated, as a real IMAGE
   batch, one per chunk in order. The strip is transient; this keeps it. Takes the
   preview's MODEL output purely to order itself after the sampler, and refuses with a
   message when nothing was recorded rather than handing on an empty batch. Same

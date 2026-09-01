@@ -9,6 +9,23 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.96.1
+
+### Changed
+
+- **`MMH3LivePreview` is now labelled "MMH3 Timeline Preview"**, and
+  `MMH3GetPreviewFrames` "MMH3 Get Timeline Frames". Since 0.95.0 the node extends the
+  timeline per CHUNK and `live_steps` is the off-by-default opt-in, so naming the whole
+  node after the sub-feature had it backwards.
+
+  **The node ids are unchanged.** Saved graphs reference the id, not the label, so the
+  wired node in `MMH3_Looping_I2V_ManualPrompt.json` and anyone's existing workflow
+  keeps resolving. Only what the menu and the node header show has moved.
+
+  The websocket event, the JS file name and the Python class keep their old names —
+  they are internal, renaming them would need both sides changed at once, and it would
+  buy nothing.
+
 ## [Unreleased] — 0.96.0
 
 ### Fixed

@@ -804,7 +804,7 @@ class MMH3LoopingSampler(io.ComfyNode):
                 in_mask_a = ma if in_mask_a is None else torch.minimum(
                     in_mask_a.to(ma.dtype), ma)
 
-        # None unless something wired MMH3 Live Preview onto the model. The
+        # None unless something wired MMH3 Timeline Preview onto the model. The
         # sampler must behave identically when it is None, which is why the preview
         # is DISCOVERED here rather than owned: no wiring, no object, no branch that
         # can change a render.

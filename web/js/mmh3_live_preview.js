@@ -1,7 +1,7 @@
 import { app } from "../../../scripts/app.js";
 import { api } from "../../../scripts/api.js";
 
-// The filmstrip is addressed to the MMH3 Live Preview node's own id rather than to
+// The filmstrip is addressed to the MMH3 Timeline Preview node's own id rather than to
 // whichever node is executing. Core's UNENCODED_PREVIEW_IMAGE channel always lands
 // on the executing node, so two live previews overwrite each other; this is the only
 // route to "put this image on that node", and it is why this file exists at all.

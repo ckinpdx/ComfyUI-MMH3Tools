@@ -56,7 +56,7 @@ FPS = 24                # H3's own frame rate; real-time playback means this
 MAX_STRIP = 16          # past this the strip is unreadable at any sane width
 TILE_MIN = 64
 
-# node_id -> the tiles that node last accumulated, so MMH3 Get Preview Frames can
+# node_id -> the tiles that node last accumulated, so MMH3 Get Timeline Frames can
 # hand them back as a real IMAGE after the run. A live preview is transient by
 # nature; the frames it drew are worth keeping.
 _FRAMES = {}
@@ -397,7 +397,7 @@ class PreviewSession:
 
 
 def begin_preview(model_patcher, chunk_count):
-    """A session if something wired MMH3 Live Preview, else None.
+    """A session if something wired MMH3 Timeline Preview, else None.
 
     None is the ordinary case and the sampler must stay identical under it -- the
     whole point of discovering the preview rather than owning it.
@@ -423,7 +423,10 @@ class MMH3LivePreview(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="MMH3LivePreview",
-            display_name="MMH3 Live Preview",
+            # The id stays: saved graphs reference it. Only the label moves, because
+            # since 0.95.0 this extends per CHUNK -- "live" is what `live_steps`
+            # opts into, so naming the whole node for it had it backwards.
+            display_name="MMH3 Timeline Preview",
             category="MMH3Tools/sampling",
             description=(
                 "Push a filmstrip of the chunks finished so far while MMH3 Looping "
@@ -443,7 +446,7 @@ class MMH3LivePreview(io.ComfyNode):
                 "the right ones in the right order, which is what a step counter "
                 "cannot.\n\n"
                 "Any error switches the preview off for the run rather than "
-                "interrupting it. Use MMH3 Get Preview Frames to keep what it drew."
+                "interrupting it. Use MMH3 Get Timeline Frames to keep what it drew."
             ),
             inputs=[
                 io.Model.Input("model"),
@@ -533,10 +536,10 @@ class MMH3GetPreviewFrames(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="MMH3GetPreviewFrames",
-            display_name="MMH3 Get Preview Frames",
+            display_name="MMH3 Get Timeline Frames",
             category="MMH3Tools/sampling",
             description=(
-                "The tiles MMH3 Live Preview accumulated on its last run, as a real "
+                "The frames MMH3 Timeline Preview accumulated on its last run, as a real "
                 "IMAGE batch -- one frame per chunk, in order. The live strip is "
                 "transient; this is how it survives the run.\n\n"
                 "Takes the preview's MODEL output so it runs after sampling rather "
@@ -549,7 +552,7 @@ class MMH3GetPreviewFrames(io.ComfyNode):
             inputs=[
                 io.Model.Input(
                     "model",
-                    tooltip="The MMH3 Live Preview node's model output. Only used to "
+                    tooltip="The MMH3 Timeline Preview node's model output. Only used to "
                             "order this node after the sampler."),
             ],
             outputs=[
@@ -570,7 +573,7 @@ class MMH3GetPreviewFrames(io.ComfyNode):
                     break
         if not tiles:
             raise ValueError(
-                "MMH3GetPreviewFrames: nothing recorded. MMH3 Live Preview has not "
+                "MMH3GetPreviewFrames: nothing recorded. MMH3 Timeline Preview has not "
                 "run in this process, or the run it made was cached and never "
                 "sampled.")
         h = max(int(t.shape[0]) for t in tiles)

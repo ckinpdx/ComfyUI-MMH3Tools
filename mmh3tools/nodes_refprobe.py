@@ -46,12 +46,20 @@ _PATCHED = set()
 # Accumulates across every recorded call. Written during sampling, read afterwards by
 # MMH3RefAttentionMap, because the probe has nowhere to return an image from.
 _RECORD = {"mass": None, "hits": 0, "labels": [], "query": "", "calls": 0,
-           "layers": set(), "note": "", "ref_rows": [], "total_rows": 0}
+           "layers": set(), "note": "", "ref_rows": [], "total_rows": 0,
+           # Why nothing was recorded, when nothing was. Every skip path used to
+           # return silently, so "nothing recorded" could mean the probe never ran,
+           # or the layout was never captured, or the rows asked for do not exist --
+           # three different fixes behind one message.
+           "seen": 0, "skip_layer": 0, "skip_layout": 0, "skip_refs": 0,
+           "skip_target": 0, "kinds": set()}
 
 
 def reset_record():
     _RECORD.update({"mass": None, "hits": 0, "labels": [], "query": "", "calls": 0,
-                    "layers": set(), "note": "", "ref_rows": [], "total_rows": 0})
+                    "layers": set(), "note": "", "ref_rows": [], "total_rows": 0,
+                    "seen": 0, "skip_layer": 0, "skip_layout": 0, "skip_refs": 0,
+                    "skip_target": 0, "kinds": set()})
 
 
 def _patch_packed_layout():
@@ -297,6 +305,47 @@ def _record(q, k, heads, skip_reshape, topts, scale, block):
         _RECORD["layers"].add(int(block))
 
 
+def _why_nothing():
+    """Which of the four reasons it was, from the counters kept while sampling.
+
+    "Nothing recorded" was one message for four different faults, each with a
+    different fix. Whatever the probe DID see is stated, because the useful
+    information is usually what was there instead of what was asked for.
+    """
+    seen = _RECORD["seen"]
+    if seen == 0:
+        return ("  The probe never saw an attention call. Either MMH3 Reference "
+                "Attention Probe is not in the model chain that reached the sampler, "
+                "its `enabled` is off, or nothing sampled at all.")
+
+    bits = ["  the probe saw %d attention call(s)" % seen]
+    if _RECORD["skip_layer"]:
+        bits.append("  %d skipped by the `layers` filter" % _RECORD["skip_layer"])
+    if _RECORD["skip_layout"]:
+        bits.append("  %d had no packed layout to read -- the sequence was built in a "
+                    "way this could not follow" % _RECORD["skip_layout"])
+    if _RECORD["skip_refs"]:
+        bits.append("  %d had a layout but NO reference segments: the run carried no "
+                    "references at all" % _RECORD["skip_refs"])
+    if _RECORD["skip_target"]:
+        bits.append("  %d had references but no `%s` rows to measure FROM"
+                    % (_RECORD["skip_target"], _RECORD["query"] or "?"))
+    if _RECORD["kinds"]:
+        bits.append("  segment kinds actually present: %s"
+                    % ", ".join(sorted(_RECORD["kinds"])))
+
+    if _RECORD["skip_target"] and _RECORD["kinds"]:
+        bits.append("")
+        bits.append("  Set `query_rows` to one of the kinds above. An AUDIO reference "
+                    "is a `ref_audio` segment and is measured FROM the target rows, "
+                    "so it still needs `audio` (or `video`) present to measure from.")
+    elif _RECORD["skip_layer"] == seen:
+        bits.append("")
+        bits.append("  Every call was filtered out. Widen `layers`, or clear it to "
+                    "record every block.")
+    return "\n".join(bits)
+
+
 def _ramp(v):
     """0..1 -> RGB. Dark blue (ignored) through green to yellow (dominant)."""
     v = v.clamp(0, 1)
@@ -437,10 +486,7 @@ class MMH3RefAttentionMap(io.ComfyNode):
             blank = torch.zeros(1, height, width, 3)
             return io.NodeOutput(blank, (
                 "MMH3 Reference Attention Map -- nothing recorded.\n\n"
-                "  The probe records during SAMPLING, so run a generation with it "
-                "wired into the model chain first.\n"
-                "  If you did: the run had no reference blocks, or `layers` excluded "
-                "every block that ran."
+                + _why_nothing()
                 + ("\n  ! " + _RECORD["note"] if _RECORD["note"] else "")), latent)
 
         m = (mass / float(hits)).transpose(0, 1)             # [refs, blocks]

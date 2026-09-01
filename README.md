@@ -1203,6 +1203,13 @@ a choice here — now lives in
   and the ratio — `1008 of 37632 key rows (2.68%) — uniform attention would give 0.0268,
   measured 1.46x that`.
 
+  **When it records nothing it says which of four things went wrong** — the probe
+  never saw an attention call at all, every call was filtered out by `layers`, the
+  layout could not be read, the run carried no references, or there were references but
+  no rows of the kind `query_rows` asks for. It also prints the segment kinds it *did*
+  see, because what was there instead is usually the answer. Each has a different fix,
+  and they used to share one message.
+
   **It judges per moment, never on the time average.** Under a working binding — one
   reference leading while speaker A talks, the other while B talks — the two averages
   come out equal, so an average-based test would call the best possible result "no

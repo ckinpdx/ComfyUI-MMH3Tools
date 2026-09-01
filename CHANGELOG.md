@@ -9,6 +9,25 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.96.2
+
+### Fixed
+
+- **"nothing recorded" was one message for four different faults.** Every skip path in
+  the probe returned silently, so the map could not tell you whether the probe was never
+  in the model chain, whether `layers` filtered every call out, whether the packed layout
+  could not be read, whether the run carried no references, or whether there were
+  references but no rows of the kind `query_rows` asked for. Five causes, five fixes, one
+  sentence that guessed at two of them.
+
+  The probe now counts each skip — calls seen, layer-filtered, no-layout, no-refs,
+  no-target — and records which segment kinds it actually saw. The empty report names
+  the cause and lists the kinds that were present, because what was there instead of
+  what was asked for is usually the answer.
+
+  Reported after a run with an audio reference recorded nothing and the message could
+  not say why.
+
 ## [Unreleased] — 0.96.1
 
 ### Changed

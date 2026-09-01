@@ -9,6 +9,26 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.97.0
+
+### Changed
+
+- **A keyframe/index count mismatch now warns and truncates instead of raising.** The
+  node answered the same class of mismatch two different ways: extra prompts were
+  reported as unused and the run continued, while extra keyframes stopped it dead.
+  Building an example workflow hit the hard one.
+
+  Images and indices are zipped, so the shorter list now wins, the extras are dropped,
+  and both the log and the report name exactly what went — `4 keyframe image(s) against
+  3 index/indices -- using the first 3, dropping the last 1 keyframe image(s)`.
+
+  The argument for raising is recorded in `_parse_indices` and still stands on its own
+  terms: an unplaced keyframe is a content change, where a spare prompt is inert. It
+  lost to consistency, and the cost is stated in two places rather than hidden.
+
+  **An index outside the clip remains a hard error.** That is a typo, not a count, and
+  `_parse_indices` names the offending value.
+
 ## [Unreleased] — 0.96.2
 
 ### Fixed

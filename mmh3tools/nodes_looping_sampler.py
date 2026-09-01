@@ -460,7 +460,11 @@ class MMH3LoopingSampler(io.ComfyNode):
                             "generation's resolution first -- keyframe rows share the "
                             "target grid, so a still at another size cannot be used as-is. "
                             "The frame-0 opener is stretched, later anchors are centre "
-                            "cropped; every resize is named in the log and the report."),
+                            "cropped; every resize is named in the log and the report.\n\n"
+                            "ZIPPED with `keyframe_indices`: image i goes at index i. "
+                            "A count mismatch is not fatal -- the shorter list wins and "
+                            "what was dropped is named, the same way extra prompts are "
+                            "reported as unused."),
                 io.String.Input(
                     "keyframe_indices", multiline=False, default="",
                     tooltip="Comma-separated frame indices into the WHOLE clip -- place a "
@@ -468,7 +472,11 @@ class MMH3LoopingSampler(io.ComfyNode):
                             "it. Negatives count from the end. An index inside a chunk's "
                             "carried overlap goes to the chunk that actually draws it. "
                             "Ignored entirely when no `keyframes` are attached, so one "
-                            "graph can be reused across passes that do and do not anchor."),
+                            "graph can be reused across passes that do and do not anchor.\n\n"
+                            "Fewer or more of these than there are keyframe images is a "
+                            "WARNING, not an error -- the extras are dropped and said so. "
+                            "An index OUTSIDE the clip is still an error, because that is "
+                            "a typo rather than a count."),
                 io.Vae.Input(
                     "vae", optional=True,
                     tooltip="The H3 VIDEO vae, needed only to encode `keyframes`."),
@@ -723,11 +731,27 @@ class MMH3LoopingSampler(io.ComfyNode):
         if keyframes is not None and wanted:
             if vae is None:
                 raise ValueError("MMH3LoopingSampler: keyframes need the H3 video vae.")
-            if int(keyframes.shape[0]) != len(wanted):
-                raise ValueError(
-                    "MMH3LoopingSampler: %d keyframe image(s) against %d index/indices. "
-                    "They are zipped, so the counts must match."
-                    % (int(keyframes.shape[0]), len(wanted)))
+            # Zip to the shorter and say so, the way extra prompts are handled.
+            # This used to raise. The argument for raising was that an unplaced
+            # keyframe is a content change rather than an inert spare input, and that
+            # is still true -- but it is stated in the log and in the report, and one
+            # node answering the same class of mismatch two different ways was worse
+            # than either answer. Out-of-range indices remain an ERROR: that is a
+            # typo, not a count.
+            n_img = int(keyframes.shape[0])
+            if n_img != len(wanted):
+                keep = min(n_img, len(wanted))
+                extra = ("%d keyframe image(s)" % (n_img - keep) if n_img > keep
+                         else "%d index/indices" % (len(wanted) - keep))
+                logging.warning(
+                    "[MMH3LoopingSampler] %d keyframe image(s) against %d "
+                    "index/indices -- using the first %d, dropping the last %s. They "
+                    "are ZIPPED, so image i is placed at index i.",
+                    n_img, len(wanted), keep, extra)
+                lines.append("  keyframes: %d image(s), %d index/indices -- kept %d, "
+                             "dropped the last %s" % (n_img, len(wanted), keep, extra))
+                wanted = wanted[:keep]
+                keyframes = keyframes[:keep]
             if not _guides_available():
                 raise RuntimeError(
                     "MMH3LoopingSampler: keyframes need any-index guides (PR #15439).")

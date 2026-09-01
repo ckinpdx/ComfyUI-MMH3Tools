@@ -9,6 +9,19 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.97.2
+
+### Changed
+
+- **"nothing recorded" now leads with the benign reason.** The `seen == 0` branch went
+  straight to "the probe is not in the model chain", which sends someone hunting for a
+  wiring fault when the ordinary explanation is that the run simply had no references.
+
+  **A keyframe is not a reference** — it is a guide anchored into the target rows, not a
+  `ref_img` or `ref_audio` segment — so a keyframe-only run records nothing, and that is
+  expected rather than a fault. The message says that first and keeps the wiring causes
+  after it, for the case where references really were wired.
+
 ## [Unreleased] — 0.97.1
 
 ### Changed

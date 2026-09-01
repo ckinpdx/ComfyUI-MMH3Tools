@@ -314,9 +314,18 @@ def _why_nothing():
     """
     seen = _RECORD["seen"]
     if seen == 0:
-        return ("  The probe never saw an attention call. Either MMH3 Reference "
-                "Attention Probe is not in the model chain that reached the sampler, "
-                "its `enabled` is off, or nothing sampled at all.")
+        # Lead with the benign reason. Someone whose run simply had no references
+        # is not looking at a fault, and telling them their wiring is wrong sends
+        # them hunting for a problem that does not exist. A KEYFRAME is not a
+        # reference -- it is a guide anchored into the target rows, not a ref_img
+        # or ref_audio segment -- and that is the most common way to land here.
+        return ("  Most likely there was nothing to measure: the run carried NO "
+                "references. A keyframe is not a reference -- it is a guide in the "
+                "target rows -- so a keyframe-only run records nothing, and that is "
+                "expected rather than a fault.\n\n"
+                "  If references WERE wired, then the probe never saw an attention "
+                "call at all: it is not in the model chain that reached the "
+                "sampler, or its `enabled` is off, or nothing sampled.")
 
     bits = ["  the probe saw %d attention call(s)" % seen]
     if _RECORD["skip_layer"]:

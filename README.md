@@ -209,8 +209,14 @@ with a **Fun ControlNet** driving the generate pass. A `ModelPatchLoader` and a 
 video feed **MMH3 Apply ControlNet**, which sits in the MODEL chain, so every chunk gets
 the control windowed to its own span.
 
-> **The graph in this repo predates the model-patch rework and has not been rebuilt.**
-> It still wires `ControlNetLoader` into the old cond-set node. Rewiring it is pending.
+The control sits on the **generate guider's branch only** — the two refine passes
+read the model straight off the LoRA and run uncontrolled, which is deliberate: they
+work at low denoise off zeroed conditioning, where a control video fights a picture
+that already exists.
+
+**Put the checkpoint in `models/model_patches`, not `models/controlnet`.**
+`ModelPatchLoader` lists only that folder. On one volume a hardlink serves both paths
+without a second copy — the union checkpoint is 2.2 GB.
 
 The two refine passes are deliberately left alone: they run at low denoise off zeroed
 conditioning, where a control video would be fighting a picture that already exists.

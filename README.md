@@ -452,6 +452,11 @@ for any node is in its tooltip.
 
   It costs N text-encodes rather than one, but **inside a single text-encoder load** —
   N forward passes, not N model swaps, which is the thing this node exists to protect.
+  That is true because the work runs in **two passes**: every window's references are
+  VAE-encoded first, then every prompt is text-encoded. Interleaving them made the two
+  models evict each other once per window — measured by ucren on an 8-window run as
+  eight full swaps of a 15 GB text encoder against a 2.7 GB VAE, all of it before the
+  first sampling step. Fixed in 0.98.0; before that this paragraph was wrong.
   The vision work is partitioned, not duplicated. And at sampling time it is *cheaper*:
   reference tokens are attended at every step, and a window is a fraction of the whole
   reference — measured at **~32%** for a 600-frame reference in four windows.

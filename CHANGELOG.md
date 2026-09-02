@@ -9,6 +9,32 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.98.0
+
+### Fixed
+
+- **Windowed references thrashed the VAE and the text encoder against each other.**
+  The cond loop built a window's references (VAE) and then encoded that window's prompt
+  (text encoder), per window — so the two models evicted each other every iteration.
+  ucren's log on an 8-window run shows it plainly: eight `MiniMaxH3VideoVAE` stages
+  interleaved with eight `MiniMaxH3TEModel_` stages, 2.7 GB against 15 GB, all before a
+  single sampling step.
+
+  The work now runs in **two passes**: every window's references are encoded first with
+  the VAE resident, then every prompt is encoded with the text encoder resident. One
+  load of each instead of N of both. Verified by call ordering — every VAE call precedes
+  every text encode.
+
+  **The README claimed this was already true** — "inside a single text-encoder load,
+  N forward passes, not N model swaps". It was not. The claim is now accurate and the
+  README says which version made it so.
+
+  Cost: N windows' reference latents are held at once rather than one at a time. Small
+  against a 15 GB model swap, and the reference blocks were already being retained per
+  cond anyway.
+
+  Reported by ucren, 2026-09-01.
+
 ## [Unreleased] — 0.97.2
 
 ### Changed

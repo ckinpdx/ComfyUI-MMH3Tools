@@ -771,22 +771,37 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
             fp = _fingerprint(ref_blocks, raw_inputs, width, height, length,
                               ref_image_size)
 
-        conds = []
-        hits = 0
         # With windowing on there is one cond PER WINDOW, not per prompt -- a single
         # prompt is reused for all of them. Iterating `texts` here is what made the
         # cond list short and every later chunk fall back to window 0.
         n_conds = len(texts) if windows is None else len(windows)
-        for pi in range(n_conds):
-            text = texts[min(pi, len(texts) - 1)]
-            if windows is not None:
-                span = windows[pi]
-                ref_items, ref_blocks = _build_refs(
+
+        # TWO PASSES, and the split is the whole point. Building a window's refs
+        # uses the VAE; encoding its prompt uses the text encoder. Interleaving them
+        # made the two evict each other every window -- measured on an 8-window run
+        # as eight full swaps of a 15 GB text encoder against a 2.7 GB VAE, all of
+        # it before a single sampling step. Doing every VAE encode first and every
+        # text encode second is one load of each.
+        built = []
+        if windows is not None:
+            for span in windows[:n_conds]:
+                items, blocks = _build_refs(
                     vae, audio_vae, width, height, frame_count, ref_image_size,
                     ref_images, ref_videos, ref_video_audios, ref_audios,
                     ref_window=span)
-                fp = _fingerprint(ref_blocks, raw_inputs + [span], width, height,
-                                  length, ref_image_size)
+                built.append((items, blocks,
+                              _fingerprint(blocks, raw_inputs + [span], width, height,
+                                           length, ref_image_size)))
+            logging.info("[MMH3ReferenceMultiPrompt] %d window(s) encoded by the VAE "
+                         "in one pass; the text encoder loads once after this",
+                         len(built))
+
+        conds = []
+        hits = 0
+        for pi in range(n_conds):
+            text = texts[min(pi, len(texts) - 1)]
+            if windows is not None:
+                ref_items, ref_blocks, fp = built[pi]
             key = (text, fp)
             cached = _CACHE.get(key)
             if cached is not None:

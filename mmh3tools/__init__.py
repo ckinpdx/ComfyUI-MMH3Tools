@@ -9,7 +9,7 @@ from .nodes_schedule import MMH3ChunkSchedule, MMH3ChunkScheduleFrames
 from .nodes_music_analysis import MMH3MusicAnalysis
 from .nodes_musicscene import MMH3MusicScenePlanPrompt
 from .nodes_stylepack import MMH3LoadSkill
-from .nodes_controlnet import MMH3CondSetApplyControl
+from .nodes_controlnet import MMH3ApplyControl
 from .nodes_embedselect import MMH3EmbeddingSelect
 from .nodes_encode import MMH3StreamingEncode
 from .nodes_lint import MMH3PromptLint
@@ -82,7 +82,7 @@ NODES = [
     MMH3ChunkSchedule,
     MMH3EmbeddingSelect,
     MMH3ImageList,
-    MMH3CondSetApplyControl,
+    MMH3ApplyControl,
     WhisperAlignmentToText,
     MMH3RefAttentionProbe,
     MMH3RefAttentionMap,

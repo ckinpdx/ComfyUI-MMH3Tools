@@ -9,6 +9,42 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.99.0
+
+### Changed
+
+- **`MMH3CondSetApplyControl` is replaced by `MMH3ApplyControl` — "MMH3 Apply
+  ControlNet", `MMH3Tools/sampling`.** Core reworked H3's Fun ControlNet from a
+  ControlNet into a MODEL PATCH on 2026-08-31
+  ([#15975](https://github.com/Comfy-Org/ComfyUI/pull/15975), by comfyanonymous, not
+  kijai's #15860 which remains open). `comfy.controlnet.MiniMaxH3ControlNet` no longer
+  exists, so the old node could not be ported — only replaced.
+
+  It is now MODEL + MODEL_PATCH in, MODEL out, loaded with `ModelPatchLoader`, and it
+  belongs in the model chain rather than between the prompts and the sampler.
+
+  **The pack no longer asks you to carry any core diff.** #15860 has been dropped.
+
+  **Both chunk faults survived the rework upstream**, so the reason for this node is
+  unchanged: `_fit_frames` still selects hint frames with `torch.arange(frame_count)`
+  from zero — control video, inpaint mask and source video alike — and
+  `prepare_control_latent` still caches on the target shape, which every chunk of a
+  render shares. Unwrapped, every chunk is driven by the control video's opening frames
+  and chunk 0's encode is reused throughout, silently.
+
+  The fix got smaller. `diffusion_model_wrapper` is handed `transformer_options` on
+  every call, so the offset MMH3 Looping Sampler publishes is simply read, where the
+  old version had to swap attributes on a cached ControlNet around a delegated call.
+  Verified: the first hint frame tracks the offset (0 → 0, 85 → 85, 170 → 170), and
+  putting the offset in the cache key means three encodes across five calls at three
+  distinct offsets instead of one reused for all.
+
+### Known gap
+
+- **`workflows/MMH3_Looping_I2V_ControlNet.json` has not been rebuilt** for the
+  model-patch API. It still wires `ControlNetLoader` into the removed node and will not
+  load correctly. Rewiring is pending.
+
 ## [Unreleased] — 0.98.0
 
 ### Fixed

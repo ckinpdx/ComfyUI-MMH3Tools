@@ -44,19 +44,20 @@ On an older ComfyUI the pack does not pretend. `MMH3SeedOverlap` and the keyfram
 > carrying, check your ComfyUI version first. `per_row_mask_is_continuous()` reports
 > what the installed core actually does.
 
-### One thing is NOT merged: the Fun ControlNet
+### The Fun ControlNet is merged, and it is a MODEL PATCH now
 
-**`MMH3CondSetApplyControl` and `MMH3_Looping_I2V_ControlNet.json` need
-[PR #15860](https://github.com/Comfy-Org/ComfyUI/pull/15860) applied to your ComfyUI.**
-It is kijai's, and it is a **draft** — the only carried diff this pack asks for, and
-the only one that can move under you. Everything else in the pack runs on stock.
+H3's Fun ControlNet landed in core on **2026-08-31** ([#15975](https://github.com/Comfy-Org/ComfyUI/pull/15975)),
+implemented by comfyanonymous rather than kijai's [#15860](https://github.com/Comfy-Org/ComfyUI/pull/15860),
+which is still open and unmerged. **This pack no longer asks you to carry any diff.**
 
-```
-git -C /path/to/ComfyUI apply <(curl -sL https://github.com/Comfy-Org/ComfyUI/pull/15860.diff)
-```
+The shape changed with it. It used to be a ControlNet — CONDITIONING in and out, the
+control carried on the cond, wrapping `comfy.controlnet.MiniMaxH3ControlNet`. That
+class is gone. It is now a **model patch**: MODEL + MODEL_PATCH in, MODEL out, loaded
+with `ModelPatchLoader`. So **MMH3 Apply ControlNet** sits in the model chain beside
+MMH3 Timeline Preview, not between the prompts and the sampler.
 
-Without it the node **refuses with a message** rather than half-working: it checks for
-`MiniMaxH3ControlNet` and for each internal it windows, and says which is missing.
+`MMH3CondSetApplyControl` was the old node and has been removed. On a ComfyUI without
+the merge, the new node **refuses with a message** rather than half-working.
 
 It also needs weights — the union checkpoint, ~2.1 GB, into `models/controlnet/`:
 
@@ -204,9 +205,12 @@ The still on `ref_images` is left wired and stays whole: `<Picture 1>` for ident
 `<Video 1>` for the windowed motion. Unwire it for a pure video reference.
 
 [`workflows/MMH3_Looping_I2V_ControlNet.json`](workflows/) — the ManualPrompt graph
-with a **Fun ControlNet** driving the generate pass. A `ControlNetLoader` and a control
-video feed **MMH3 Cond Set Apply ControlNet**, which sits between the multiprompt node
-and the sampler's `cond_set`, so every chunk gets the control windowed to its own span.
+with a **Fun ControlNet** driving the generate pass. A `ModelPatchLoader` and a control
+video feed **MMH3 Apply ControlNet**, which sits in the MODEL chain, so every chunk gets
+the control windowed to its own span.
+
+> **The graph in this repo predates the model-patch rework and has not been rebuilt.**
+> It still wires `ControlNetLoader` into the old cond-set node. Rewiring it is pending.
 
 The two refine passes are deliberately left alone: they run at low denoise off zeroed
 conditioning, where a control video would be fighting a picture that already exists.
@@ -532,15 +536,14 @@ for any node is in its tooltip.
   list. A file whose header will not parse is listed and allowed through — its slot
   count simply reports as `?`.
 
-- **MMH3 Cond Set Apply ControlNet** — applies a MiniMax H3 **Fun ControlNet** to
-  every prompt in a cond set, so a chunked render can use one. Core's apply node takes
-  a single CONDITIONING and this pack's sampler takes a cond set, so the two do not
-  meet without it.
+- **MMH3 Apply ControlNet** — a MiniMax H3 **Fun ControlNet** that follows the chunk
+  being rendered. MODEL + MODEL_PATCH in, MODEL out, matching core's node since the
+  model-patch rework.
 
-  It also makes the control **chunk-aware**, which is the part that matters. Core's
-  `get_control` picks hint frames with `torch.arange(pixel_t)` — from zero, three
-  times over (control video, inpaint mask, source video) — and caches the encode keyed
-  on `cond_hint.shape[2:]`. Every chunk shares a shape, so unwrapped, **all of them are
+  Chunk-awareness is the whole point. Core's `_fit_frames` picks hint frames with
+  `torch.arange(frame_count)` — from zero, for the control video, the inpaint mask and
+  the source video alike — and `prepare_control_latent` caches the encode keyed
+  on the target shape. Every chunk shares a shape, so unwrapped, **all of them are
   driven by the control video's opening frames** and chunk 0's encode is reused
   throughout, with no error anywhere. The wrapper slices those three inputs to the
   chunk's own span before delegating, so core's arange-from-zero is right because zero

@@ -7,7 +7,13 @@ import { api } from "../../../scripts/api.js";
 // route to "put this image on that node", and it is why this file exists at all.
 //
 // Payload (see PreviewSession._send in mmh3tools/nodes_preview.py):
-//   { node_id, image: <base64>, mime, w, h, chunks, total, labels: [...] }
+//   { node_id, seq, mime, w, h, chunks, total, frames, seconds, labels: [...], live }
+//
+// The event is metadata only. The image itself is fetched over HTTP from
+// /mmh3/preview?node_id=<id>, so a large animated WebP never rides the websocket,
+// where core's publish loop would hold every client's progress events behind it.
+// `seq` is the cache-buster; reassigning img.src aborts any load still in flight,
+// so a slow tab falls behind by at most one frame and never builds a queue.
 
 const WIDGET_NAME = "mmh3_preview";
 
@@ -49,8 +55,8 @@ function ensureWidget(node) {
     caption.textContent = "waiting for the first chunk";
     root.appendChild(caption);
 
-    // serialize:false -- this is a view, not state. Saving it would put a base64
-    // JPEG into every workflow file.
+    // serialize:false -- this is a view, not state, and the widget holds a URL to
+    // a frame that only exists while the server that drew it is up.
     node.addDOMWidget(WIDGET_NAME, "mmh3_preview", root, { serialize: false });
     node._mmh3PreviewRoot = root;
     node._mmh3PreviewImg = img;
@@ -64,10 +70,11 @@ function ensureWidget(node) {
 function draw(node, data) {
     ensureWidget(node);
     const img = node._mmh3PreviewImg;
-    if (data.image) {
-        // A data: URL avoids the object-URL lifetime problem entirely -- there is
-        // nothing to revoke, and a dropped frame cannot leak.
-        img.src = `data:${data.mime || "image/jpeg"};base64,${data.image}`;
+    if (data.seq !== undefined) {
+        // api.apiURL respects a server subpath. Plain URL, not an object URL: there
+        // is nothing to revoke, and a dropped frame cannot leak.
+        img.src = api.apiURL(
+            `/mmh3/preview?node_id=${encodeURIComponent(data.node_id)}&seq=${data.seq}`);
     }
     // While a chunk is sampling its step counter is the useful number; between
     // chunks, what was banked is.

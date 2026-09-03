@@ -29,7 +29,6 @@ APPROXIMATION -- colour is indicative, fine detail is not there at all. It answe
 the numbers cannot answer.
 """
 
-import base64
 import io as pyio
 import logging
 import threading
@@ -61,6 +60,64 @@ TILE_MIN = 64
 # nature; the frames it drew are worth keeping.
 _FRAMES = {}
 _FRAMES_LOCK = threading.Lock()
+
+# node_id -> (bytes, mime) of the image that node last drew, served over HTTP.
+#
+# The websocket event carries METADATA ONLY. Core's publish loop awaits every
+# connected socket in turn, so a large frame on the socket -- an animated WebP is
+# hundreds of KB, base64 makes it a third bigger again -- stalls progress events for
+# every client until the slowest one has drained it. The browser fetches the bytes
+# from `/mmh3/preview?node_id=` instead, latest-wins: reassigning an <img>'s src
+# aborts the load in flight, so a slow tab falls behind by at most one frame and
+# never queues. The `seq` in the event is the cache-buster.
+_MEDIA = {}
+_MEDIA_SEQ = 0
+_MEDIA_LOCK = threading.Lock()
+_ROUTE_REGISTERED = False
+
+
+def _store_media(node_id, body, mime):
+    global _MEDIA_SEQ
+    with _MEDIA_LOCK:
+        _MEDIA_SEQ += 1
+        _MEDIA[str(node_id)] = (body, mime)
+        return _MEDIA_SEQ
+
+
+def _register_media_route():
+    """GET /mmh3/preview?node_id=<id> -> the bytes `_send` last stored for that node.
+
+    Registered at import, which is when ComfyUI loads custom nodes -- before the
+    aiohttp app is started, the only time a route can still be added. Guarded so
+    the module imports cleanly with no server (tests, `python -c`).
+    """
+    global _ROUTE_REGISTERED
+    if _ROUTE_REGISTERED:
+        return
+    try:
+        from aiohttp import web
+        from server import PromptServer
+    except ImportError:
+        return
+    server = getattr(PromptServer, "instance", None)
+    if server is None:
+        return
+
+    @server.routes.get("/mmh3/preview")
+    async def _preview_media(request):
+        node_id = request.rel_url.query.get("node_id", "")
+        with _MEDIA_LOCK:
+            entry = _MEDIA.get(node_id)
+        if entry is None:
+            return web.Response(status=404, text="no preview stored for node %r" % node_id)
+        body, mime = entry
+        return web.Response(body=body, content_type=mime,
+                            headers={"Cache-Control": "no-store"})
+
+    _ROUTE_REGISTERED = True
+
+
+_register_media_route()
 
 
 def _suppress_default_previews():
@@ -381,9 +438,10 @@ class PreviewSession:
             image.save(buf, format="JPEG", quality=self.quality)
             mime, w, h = "image/jpeg", image.width, image.height
 
+        seq = _store_media(self.node_id, buf.getvalue(), mime)
         server.send_sync(EVENT, {
             "node_id": self.node_id,
-            "image": base64.b64encode(buf.getvalue()).decode("ascii"),
+            "seq": seq,
             "mime": mime,
             "w": w,
             "h": h,

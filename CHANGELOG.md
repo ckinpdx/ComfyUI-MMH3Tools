@@ -9,7 +9,24 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
-## [Unreleased] — 0.99.0
+## [Unreleased] — 0.99.1
+
+### Fixed
+
+- **MMH3 Timeline Preview no longer sends the image over the websocket.** The
+  event was carrying the whole frame as base64 — an animated WebP timeline is
+  hundreds of KB, base64 makes it a third bigger — and core's publish loop awaits
+  every connected socket in turn, so one slow tab held every client's progress
+  events behind the frame. The event is now metadata only (`seq`, `mime`, `w`,
+  `h`, chunks, labels) and the browser fetches the bytes from a new route,
+  `GET /mmh3/preview?node_id=<id>`, which serves whatever that node last drew.
+  Latest-wins by construction: reassigning the `<img>` aborts any load still in
+  flight, so a slow tab falls at most one frame behind and never builds a queue.
+  The pattern is the one drozbay's ComfyUI-PreviewRelay uses; reimplemented, no
+  code copied. No inputs changed. The WebP encode still runs on the sampler
+  thread — moving it off is a separate change.
+
+## 0.99.0
 
 ### Changed
 

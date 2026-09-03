@@ -1062,7 +1062,15 @@ a choice here — now lives in
   there is one slot per running node. Taking the node's own `unique_id` and sending a
   custom event to a DOM widget is the only way to keep them separable, which is why
   the pack ships `web/js/mmh3_live_preview.js`. The widget is `serialize: false`: it
-  is a view, not state, and saving it would put a base64 JPEG in every workflow file.
+  is a view, not state.
+
+  **The image does not ride the websocket.** The event carries metadata only
+  (`seq`, dimensions, chunk count, labels); the browser fetches the bytes from
+  `/mmh3/preview?node_id=<id>`. Core's publish loop awaits every connected socket in
+  turn, so a large animated WebP on the socket would hold every client's progress
+  events behind the slowest tab. Over HTTP it is latest-wins: reassigning the
+  `<img>` aborts the load in flight, so a slow tab falls at most one frame behind and
+  never queues. (Since 0.99.1; earlier versions sent base64 in the event.)
 
   Any error switches the preview off for the run rather than interrupting it.
 

@@ -9,7 +9,45 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
-## [Unreleased] — 0.99.2
+## [Unreleased] — 0.100.0
+
+### Added
+
+- **MMH3 Timeline Preview plays its sound.** New optional `audio_vae` input,
+  appended after `vae` (append-only). Wire a stock VAE Loader at the full H3
+  audio VAE (`minimax_h3_audio_vae_fp32.safetensors`); each finished chunk's
+  audio latent — which the looping sampler already had in hand next to the
+  video, in VAE space — is decoded through core's own `vae_decode_audio`
+  (loudness normalisation included) and appended to a mono waveform kept in
+  lock-step with the frames: its length is always
+  `round(frames × stride × sr / fps)` samples, so the two agree at every chunk
+  boundary and under the `max_frames` cap. Served as 16-bit mono WAV from the
+  preview route with `kind=audio`, under the same `seq` as the picture. A decode
+  that fails once leaves the preview silent for the rest of the run. Without
+  the input, nothing changes except the player below. `live_steps` stays
+  video-only (the per-step `x0` is sampler-space and would need the
+  `audio_scale` division; not done).
+
+### Changed
+
+- **The preview widget is a player, not an `<img>`.** The picture is now a
+  static WebP **sprite sheet** of the kept frames rather than an animated WebP —
+  an animation cannot be seeked, paused, or kept in step with a sound. The
+  widget's canvas draws frame `floor(t × fps / stride)` at whatever `t` the
+  `<audio>` element reports, or a wall timer when there is no audio, so picture
+  and sound cannot drift. Play/pause, a scrub bar, and a mute button (shown
+  only when there is sound). The timeline starts on its own when the first chunk
+  lands; if the browser refuses sound without a click, the ▶ button is that
+  click. A static sheet also encodes faster than the animation did. Tiles shrink
+  to fit when a sheet would pass WebP's 16383-px side limit. Route gains a
+  `kind=image|audio` parameter (default `image`). Event payload: `image`
+  dimensions plus `sprite {cols, rows, tw, th, count}`, `fps`, `stride`,
+  `audio`, `sr`. The ideas — sprite + audio clock, sound in a live preview at
+  all — owe to drozbay's ComfyUI-PreviewRelay; reimplemented, no code copied.
+- `PreviewSession.chunk()` takes an optional fifth argument, the chunk's audio
+  latent; MMH3 Looping Sampler passes it.
+
+## 0.99.2
 
 ### Changed
 

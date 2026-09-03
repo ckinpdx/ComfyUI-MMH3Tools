@@ -926,7 +926,7 @@ class MMH3LoopingSampler(io.ComfyNode):
                                                   and carry == "keyframe" else 0))
                             if guides_by_chunk.get(i) else ""))
             if preview is not None:
-                preview.chunk(i, dv, v0, v1)
+                preview.chunk(i, dv, v0, v1, da)
             logging.info("[MMH3LoopingSampler] chunk %d/%d done", i + 1, n)
 
         # The first generated chunk OVERLAPS the prior -- that is what the carry is --

@@ -31,8 +31,10 @@ the numbers cannot answer.
 
 import io as pyio
 import logging
+import math
 import queue
 import threading
+import wave
 
 import torch
 
@@ -55,6 +57,7 @@ FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
 FPS = 24                # H3's own frame rate; real-time playback means this
 MAX_STRIP = 16          # past this the strip is unreadable at any sane width
 TILE_MIN = 64
+SHEET_MAX = 16000        # WebP's hard limit is 16383 per side
 
 # node_id -> the tiles that node last accumulated, so MMH3 Get Timeline Frames can
 # hand them back as a real IMAGE after the run. A live preview is transient by
@@ -62,7 +65,8 @@ TILE_MIN = 64
 _FRAMES = {}
 _FRAMES_LOCK = threading.Lock()
 
-# node_id -> (bytes, mime) of the image that node last drew, served over HTTP.
+# (node_id, kind) -> (bytes, mime) of what that node last drew, served over HTTP.
+# kind is "image" (the sprite sheet) or "audio" (a WAV of the same timeline).
 #
 # The websocket event carries METADATA ONLY. Core's publish loop awaits every
 # connected socket in turn, so a large frame on the socket -- an animated WebP is
@@ -77,16 +81,23 @@ _MEDIA_LOCK = threading.Lock()
 _ROUTE_REGISTERED = False
 
 
-def _store_media(node_id, body, mime):
+def _store_media(node_id, image, mime, audio=None):
+    """Store the sprite and (optionally) its WAV under ONE seq, so the client never
+    pairs a new picture with an old sound."""
     global _MEDIA_SEQ
+    key = str(node_id)
     with _MEDIA_LOCK:
         _MEDIA_SEQ += 1
-        _MEDIA[str(node_id)] = (body, mime)
+        _MEDIA[(key, "image")] = (image, mime)
+        if audio is None:
+            _MEDIA.pop((key, "audio"), None)
+        else:
+            _MEDIA[(key, "audio")] = (audio, "audio/wav")
         return _MEDIA_SEQ
 
 
 def _register_media_route():
-    """GET /mmh3/preview?node_id=<id> -> the bytes `_send` last stored for that node.
+    """GET /mmh3/preview?node_id=<id>&kind=image|audio -> what `_send` last stored.
 
     Registered at import, which is when ComfyUI loads custom nodes -- before the
     aiohttp app is started, the only time a route can still be added. Guarded so
@@ -107,10 +118,12 @@ def _register_media_route():
     @server.routes.get("/mmh3/preview")
     async def _preview_media(request):
         node_id = request.rel_url.query.get("node_id", "")
+        kind = request.rel_url.query.get("kind", "image")
         with _MEDIA_LOCK:
-            entry = _MEDIA.get(node_id)
+            entry = _MEDIA.get((node_id, kind))
         if entry is None:
-            return web.Response(status=404, text="no preview stored for node %r" % node_id)
+            return web.Response(status=404, text="no preview %s stored for node %r"
+                                % (kind, node_id))
         body, mime = entry
         return web.Response(body=body, content_type=mime,
                             headers={"Cache-Control": "no-store"})
@@ -172,38 +185,79 @@ def _submit(job):
                 pass
 
 
+def _sprite(tiles):
+    """[H,W,3] tiles -> one roughly square sheet, row-major, plus its grid.
+
+    A sheet rather than an animated file because an animation cannot be seeked,
+    paused or kept in step with a sound: the browser draws frame
+    floor(t * fps / stride) from the sheet at whatever `t` the audio (or a timer)
+    says, so picture and sound cannot drift apart. It also encodes faster.
+    """
+    count = len(tiles)
+    th = max(int(t.shape[0]) for t in tiles)
+    tw = max(int(t.shape[1]) for t in tiles)
+    cols = max(1, min(count, int(round(math.sqrt(count * th / float(tw))))))
+    rows = int(math.ceil(count / float(cols)))
+    # WebP refuses anything past 16383 px on a side. A tall tile on a long
+    # timeline gets there, so the tiles shrink to fit rather than the encode
+    # failing -- the timeline is the point, the tile size is a preference.
+    scale = min(1.0, SHEET_MAX / float(cols * tw), SHEET_MAX / float(rows * th))
+    if scale < 1.0:
+        import comfy.utils
+        th, tw = max(8, int(th * scale)), max(8, int(tw * scale))
+        tiles = [comfy.utils.common_upscale(
+            t.permute(2, 0, 1).unsqueeze(0), tw, th, "bilinear", "disabled"
+        ).squeeze(0).permute(1, 2, 0) for t in tiles]
+    sheet = torch.zeros((rows * th, cols * tw, 3), dtype=torch.float32)
+    for i, t in enumerate(tiles):
+        y, x = (i // cols) * th, (i % cols) * tw
+        sheet[y:y + int(t.shape[0]), x:x + int(t.shape[1])] = t
+    return sheet, {"cols": cols, "rows": rows, "tw": tw, "th": th, "count": count}
+
+
+def _wav_bytes(mono, sr):
+    """1-D float waveform in -1..1 -> 16-bit mono WAV."""
+    pcm = (mono.clamp(-1.0, 1.0) * 32767.0).to(torch.int16).numpy().tobytes()
+    buf = pyio.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(int(sr))
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
 def _encode_and_send(job):
-    """Worker side: frames -> bytes -> _MEDIA -> metadata event."""
+    """Worker side: frames (+ audio) -> bytes -> _MEDIA -> metadata event."""
     from PIL import Image
 
     if job["frames"]:
-        # The timeline, PLAYING. Every kept frame stands for `stride` real
-        # frames, so holding it for stride/fps seconds is real time -- which is
-        # the only way the preview tells you anything about pacing.
-        duration = max(1, int(round(1000.0 * job["stride"] / float(job["fps"]))))
-        pils = [Image.fromarray(
-            (f.numpy() * 255.0).astype("uint8")) for f in job["frames"]]
-        buf = pyio.BytesIO()
-        pils[0].save(buf, format="WEBP", save_all=True, append_images=pils[1:],
-                     duration=duration, loop=0, quality=job["quality"], method=0)
-        mime, w, h = "image/webp", pils[0].width, pils[0].height
+        tiles = job["frames"]
     else:
         # Nothing banked yet: the step-by-step still, when that is switched on.
-        strip = _tile([job["live"]], job["height"])[0]         # [3,H,W]
-        arr = (strip.permute(1, 2, 0).numpy() * 255.0).astype("uint8")
-        image = Image.fromarray(arr)
-        buf = pyio.BytesIO()
-        image.save(buf, format="JPEG", quality=job["quality"])
-        mime, w, h = "image/jpeg", image.width, image.height
+        tiles = [_tile([job["live"]], job["height"])[0].permute(1, 2, 0)]
+    sheet, grid = _sprite(tiles)
+    image = Image.fromarray((sheet.numpy() * 255.0).astype("uint8"))
+    buf = pyio.BytesIO()
+    image.save(buf, format="WEBP", quality=job["quality"], method=0)
+    audio = job["audio"]
+    wav = None
+    if job["frames"] and audio is not None and audio.numel() > 0:
+        wav = _wav_bytes(audio, job["sr"])
 
-    seq = _store_media(job["node_id"], buf.getvalue(), mime)
+    seq = _store_media(job["node_id"], buf.getvalue(), "image/webp", wav)
     n = len(job["frames"])
     job["server"].send_sync(EVENT, {
         "node_id": job["node_id"],
         "seq": seq,
-        "mime": mime,
-        "w": w,
-        "h": h,
+        "mime": "image/webp",
+        "w": image.width,
+        "h": image.height,
+        "sprite": grid,
+        "fps": job["fps"],
+        "stride": job["stride"],
+        "audio": wav is not None,
+        "sr": job["sr"],
         "chunks": len(job["labels"]),
         "total": job["chunk_count"],
         "frames": n,
@@ -350,6 +404,12 @@ class PreviewSession:
         self.quality = int(config.get("quality", 80))
         self.node_id = config.get("node_id")
         self.vae = config.get("vae")
+        # The audio stream of the same timeline, when an audio VAE is wired: one
+        # mono float waveform at `sr`, kept in lock-step with `frames` -- its
+        # length is always round(len(frames) * stride * sr / fps) samples.
+        self.audio_vae = config.get("audio_vae")
+        self.audio = None
+        self.sr = None
         self.suppress_default = bool(config.get("suppress_default", True))
         self.enabled = self.node_id is not None
         self.chunk_count = int(chunk_count)
@@ -429,6 +489,35 @@ class PreviewSession:
         del piece
         return out
 
+    def _audio_samples(self, frame_count):
+        """The waveform length that `frame_count` KEPT frames stand for."""
+        return int(round(frame_count * self.stride * float(self.sr) / float(self.fps)))
+
+    def _chunk_audio(self, audio_latent, kept_frames):
+        """The sound under `kept_frames` kept frames of a finished chunk, mono.
+
+        Cut to the frames, not to the latent: the video path decodes a grid-valid
+        PREFIX of the chunk and keeps every stride-th frame, and the last kept
+        frame is held a whole stride. The audio covers exactly that span, so the
+        two stay in step at every chunk boundary and under the max_frames cap.
+        The decode is core's own `vae_decode_audio`, loudness normalisation
+        included, so the preview sounds the way the render will.
+        """
+        import comfy_extras.nodes_audio as nodes_audio
+        lat = audio_latent if audio_latent.ndim == 4 else audio_latent.unsqueeze(0)
+        seconds = kept_frames * self.stride / float(self.fps)
+        lps = getattr(self.audio_vae.first_stage_model, "latents_per_second", 40)
+        n = min(int(lat.shape[-1]), int(math.ceil(seconds * lps)) + 1)
+        if n < 1:
+            return None
+        out = nodes_audio.vae_decode_audio(self.audio_vae, {"samples": lat[..., :n]})
+        self.sr = int(out["sample_rate"])
+        mono = out["waveform"][0].detach().to(dtype=torch.float32, device="cpu").mean(dim=0)
+        want = self._audio_samples(kept_frames)
+        if mono.shape[0] < want:
+            mono = torch.cat([mono, torch.zeros(want - mono.shape[0])])
+        return mono[:want]
+
     def _render(self, video):
         """A [T,H,W,3] preview of a video latent, by VAE if one is wired."""
         if self.vae is not None:
@@ -446,8 +535,8 @@ class PreviewSession:
                 self.vae = None
         return _to_rgb(video)
 
-    def chunk(self, index, video_latent, v0, v1):
-        """A finished chunk becomes real frames on the timeline. Never raises.
+    def chunk(self, index, video_latent, v0, v1, audio_latent=None):
+        """A finished chunk becomes real frames (and sound) on the timeline. Never raises.
 
         The whole chunk is decoded, not one frame: the timeline is meant to be
         WATCHED at speed, and the point of a chunk finishing is seeing what it
@@ -460,9 +549,27 @@ class PreviewSession:
         try:
             frames = self._chunk_frames(video_latent)
             if frames:
+                if self.audio_vae is not None and audio_latent is not None:
+                    try:
+                        piece = self._chunk_audio(audio_latent, len(frames))
+                        if piece is not None:
+                            self.audio = piece if self.audio is None \
+                                else torch.cat([self.audio, piece])
+                    except Exception as error:
+                        # Same rule as the video VAE: one failure, then silent for
+                        # the rest of the run rather than a second thing to debug.
+                        logging.info("[MMH3LivePreview] audio decode failed (%s); "
+                                     "preview continues without sound", error)
+                        self.audio_vae = None
+                        self.audio = None
                 self.frames.extend(frames)
                 if len(self.frames) > self.max_frames:
                     del self.frames[:len(self.frames) - self.max_frames]
+                if self.audio is not None:
+                    # keep the sound the same length as the frames it sits under
+                    want = self._audio_samples(len(self.frames))
+                    if self.audio.shape[0] > want:
+                        self.audio = self.audio[-want:]
                 self.labels.append("%d: %d-%d (%df)"
                                    % (index, v0, v1, span_frames(v0, v1)))
                 self.live = None
@@ -519,6 +626,8 @@ class PreviewSession:
             "client_id": server.client_id,
             "node_id": self.node_id,
             "frames": list(self.frames),
+            "audio": self.audio,
+            "sr": self.sr,
             "live": self.live,
             "live_label": self.live_label,
             "labels": list(self.labels),
@@ -579,6 +688,9 @@ class MMH3LivePreview(io.ComfyNode):
                 "indicative, fine detail is absent. It answers whether the shots are "
                 "the right ones in the right order, which is what a step counter "
                 "cannot.\n\n"
+                "Wire `audio_vae` (the full H3 audio VAE) and the timeline plays "
+                "WITH its sound, in step; the player then has play/pause, scrub and "
+                "mute. Without it the picture plays on a timer.\n\n"
                 "Any error switches the preview off for the run rather than "
                 "interrupting it. Use MMH3 Get Timeline Frames to keep what it drew."
             ),
@@ -629,6 +741,15 @@ class MMH3LivePreview(io.ComfyNode):
                             "projection that costs a matmul and is approximate. A "
                             "decode that fails once falls back to that for the rest of "
                             "the run rather than failing the render."),
+                io.Vae.Input(
+                    "audio_vae", optional=True,
+                    tooltip="Optional: decode each finished chunk's audio too, so the "
+                            "timeline plays with its sound. Wire a stock VAE Loader at "
+                            "the H3 audio VAE (`minimax_h3_audio_vae_fp32.safetensors`); "
+                            "there is no tiny variant and none is needed -- an audio "
+                            "chunk decodes in milliseconds. Sent as mono 16-bit WAV at "
+                            "the VAE's rate. A decode that fails once leaves the preview "
+                            "silent for the rest of the run rather than failing it."),
             ],
             outputs=[io.Model.Output(display_name="model")],
             hidden=[io.Hidden.unique_id],
@@ -637,7 +758,7 @@ class MMH3LivePreview(io.ComfyNode):
     @classmethod
     def execute(cls, model, tile_height=96, jpeg_quality=80, fps=24, frame_stride=3,
                 max_frames=480, live_steps=False, suppress_sampler_preview=True,
-                vae=None) -> io.NodeOutput:
+                vae=None, audio_vae=None) -> io.NodeOutput:
         import comfy.latent_formats
         if not getattr(comfy.latent_formats.MiniMaxH3Video, "latent_rgb_factors", None):
             raise ValueError(
@@ -657,6 +778,7 @@ class MMH3LivePreview(io.ComfyNode):
                 "live_steps": bool(live_steps),
                 "suppress_default": bool(suppress_sampler_preview),
                 "vae": vae,
+                "audio_vae": audio_vae,
                 "node_id": None if node_id is None else str(node_id)}))
         logging.info("[MMH3LivePreview] registered on node %s; tile height %d",
                      node_id, int(tile_height))

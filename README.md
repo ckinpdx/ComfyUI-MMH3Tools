@@ -1015,11 +1015,25 @@ a choice here — now lives in
   nothing about whether the shots are the right ones in the right order. Each chunk's
   latent is in hand the moment it is written back, and was being thrown away.
 
-  Each finished chunk is decoded and appended, and what you get is an **animated
-  timeline of the piece so far, played at 24 fps** — real time, which is the only
-  setting that says anything about pacing. `frame_stride` is a fidelity dial, not a
-  speed one: at 3 you keep a third of the frames and hold each three times as long, so
-  the clip still runs at real time for a third of the encode.
+  Each finished chunk is decoded and appended, and what you get is a **timeline of
+  the piece so far, played at 24 fps** — real time, which is the only setting that
+  says anything about pacing — with **play/pause, a scrub bar, and its own sound**
+  when `audio_vae` is wired. `frame_stride` is a fidelity dial, not a speed one: at 3
+  you keep a third of the frames and hold each three times as long, so the clip
+  still runs at real time for a third of the encode.
+
+  **`audio_vae`** (optional, since 0.100.0) decodes each finished chunk's audio too.
+  Wire a stock VAE Loader at `minimax_h3_audio_vae_fp32.safetensors` — the full H3
+  audio VAE; there is no tiny variant and none is needed, a chunk of audio decodes in
+  milliseconds and the model stays resident. The decode is core's own
+  `vae_decode_audio`, loudness normalisation included, so the preview sounds the way
+  the render will. The sound is cut to the *kept frames*, not to the latent — the
+  video path decodes a grid-valid prefix of each chunk and holds the last kept frame a
+  whole stride, and the audio covers exactly that span — so picture and sound stay in
+  step at every chunk boundary and under the `max_frames` cap. Sent as mono 16-bit
+  WAV at the VAE's rate (32 kHz → 64 KB/s, 3.8 MB at the 60-second default cap). A
+  decode that fails once leaves the preview silent for the rest of the run rather
+  than failing it. `live_steps` stays video-only.
 
   **One decode per chunk, never sliced.** The temporal grid does not compose
   additively — 7 latents decode to 22 frames and 2 decode to 5 — so tiling a 12-latent
@@ -1031,13 +1045,13 @@ a choice here — now lives in
   scaled down and 47 latents of 1344×768 is ~1.9 GB in fp32.
 
   `max_frames` caps the timeline, dropping the oldest, so a long render keeps a moving
-  window rather than an animation that grows without limit.
+  window rather than a timeline that grows without limit.
 
   **`live_steps`** (off) additionally pushes a still of the chunk being sampled on every
   step, from the `x0` core hands the wrapper as positional arg 5 of the sampler
   callback. Off by default because it replaces the playing timeline with a frozen
   frame, and it stops sending once the timeline exists — otherwise every step would
-  re-encode the whole animation.
+  re-encode the whole timeline.
 
   **`suppress_sampler_preview`** (on) silences ComfyUI's own latent preview for the
   duration of the sample, so the sampler node and this one do not draw the same thing
@@ -1064,15 +1078,24 @@ a choice here — now lives in
   the pack ships `web/js/mmh3_live_preview.js`. The widget is `serialize: false`: it
   is a view, not state.
 
-  **The image does not ride the websocket.** The event carries metadata only
-  (`seq`, dimensions, chunk count, labels); the browser fetches the bytes from
-  `/mmh3/preview?node_id=<id>`. Core's publish loop awaits every connected socket in
-  turn, so a large animated WebP on the socket would hold every client's progress
-  events behind the slowest tab. Over HTTP it is latest-wins: reassigning the
-  `<img>` aborts the load in flight, so a slow tab falls at most one frame behind and
-  never queues. (Since 0.99.1; earlier versions sent base64 in the event.) The
-  encode itself runs on a worker thread with a one-slot, newest-wins queue (0.99.2),
-  so the sampler does not wait for Pillow to re-encode the timeline after each chunk.
+  **Nothing rides the websocket.** The event carries metadata only (`seq`, the
+  sprite grid, fps/stride, whether there is sound, chunk count, labels); the browser
+  fetches the picture from `/mmh3/preview?node_id=<id>&kind=image` and the sound from
+  `kind=audio`, both under the same `seq`. Core's publish loop awaits every connected
+  socket in turn, so a large frame on the socket would hold every client's progress
+  events behind the slowest tab. Over HTTP it is latest-wins: reassigning a `src`
+  aborts the load in flight, so a slow tab falls at most one chunk behind and never
+  queues. (Since 0.99.1; earlier versions sent base64 in the event.) The encode runs
+  on a worker thread with a one-slot, newest-wins queue (0.99.2), so the sampler does
+  not wait for Pillow after each chunk.
+
+  **The picture is a sprite sheet, not an animated file** (0.100.0). An animation
+  cannot be seeked, paused, or kept in step with a sound. The kept frames go into one
+  roughly-square static WebP grid; the widget's canvas draws frame
+  `floor(t × fps / stride)` at whatever `t` the `<audio>` element reports — or a
+  timer, when there is no audio — so picture and sound cannot drift apart, and a
+  static sheet encodes faster than the animation did. Past WebP's 16383-px side limit
+  the tiles shrink to fit rather than the encode failing.
 
   Any error switches the preview off for the run rather than interrupting it.
 

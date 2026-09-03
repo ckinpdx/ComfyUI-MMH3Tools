@@ -776,12 +776,16 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
         # cond list short and every later chunk fall back to window 0.
         n_conds = len(texts) if windows is None else len(windows)
 
-        # TWO PASSES, and the split is the whole point. Building a window's refs
-        # uses the VAE; encoding its prompt uses the text encoder. Interleaving them
-        # made the two evict each other every window -- measured on an 8-window run
-        # as eight full swaps of a 15 GB text encoder against a 2.7 GB VAE, all of
-        # it before a single sampling step. Doing every VAE encode first and every
-        # text encode second is one load of each.
+        # TWO PASSES. Building a window's refs uses the VAE; encoding its prompt uses
+        # the text encoder. Grouping them -- every VAE encode, then every text encode --
+        # keeps each model in use across a contiguous run rather than alternating.
+        #
+        # This does NOT save a model load. Both orders load each model exactly once;
+        # "Requested to load" appears once per model either way. The earlier claim of
+        # "eight full swaps" misread "prepared for dynamic VRAM loading", which fires on
+        # every load_models_gpu call whether or not the model is resident. What the
+        # grouping may reduce is page-level fault traffic inside aimdo's vbar under
+        # VRAM pressure -- silent, and unmeasured. See CHANGELOG 0.98.0.
         built = []
         if windows is not None:
             for span in windows[:n_conds]:
@@ -793,7 +797,7 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                               _fingerprint(blocks, raw_inputs + [span], width, height,
                                            length, ref_image_size)))
             logging.info("[MMH3ReferenceMultiPrompt] %d window(s) encoded by the VAE "
-                         "in one pass; the text encoder loads once after this",
+                         "in one pass; the text encoder runs after this",
                          len(built))
 
         conds = []

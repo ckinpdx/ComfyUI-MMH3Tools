@@ -47,29 +47,54 @@ the entry, and migrate any local workflow in the same commit.
 
 ## [Unreleased] — 0.98.0
 
-### Fixed
+### Changed
 
-- **Windowed references thrashed the VAE and the text encoder against each other.**
-  The cond loop built a window's references (VAE) and then encoded that window's prompt
-  (text encoder), per window — so the two models evicted each other every iteration.
-  ucren's log on an 8-window run shows it plainly: eight `MiniMaxH3VideoVAE` stages
-  interleaved with eight `MiniMaxH3TEModel_` stages, 2.7 GB against 15 GB, all before a
-  single sampling step.
+- **Windowed references now VAE-encode in one pass, then text-encode in one pass.**
+  The cond loop used to build a window's references (VAE) and then encode that window's
+  prompt (text encoder), alternating per window. The work is now grouped: every window's
+  references are encoded first, then every prompt. Verified by call ordering — every VAE
+  call precedes every text encode.
 
-  The work now runs in **two passes**: every window's references are encoded first with
-  the VAE resident, then every prompt is encoded with the text encoder resident. One
-  load of each instead of N of both. Verified by call ordering — every VAE call precedes
-  every text encode.
+  Cost: N windows' reference latents are held at once rather than one at a time. The
+  reference blocks were already being retained per cond anyway.
 
-  **The README claimed this was already true** — "inside a single text-encoder load,
-  N forward passes, not N model swaps". It was not. The claim is now accurate and the
-  README says which version made it so.
+  Prompted by ucren, 2026-09-01.
 
-  Cost: N windows' reference latents are held at once rather than one at a time. Small
-  against a 15 GB model swap, and the reference blocks were already being retained per
-  cond anyway.
+### Correction
 
-  Reported by ucren, 2026-09-01.
+- **This entry originally claimed the old order "thrashed" the two models, and that is
+  not supported by the evidence.** The reasoning was that ucren's 8-window log showed
+  eight `MiniMaxH3VideoVAE` stages interleaved with eight `MiniMaxH3TEModel_` stages,
+  and that this meant eight full swaps of a 15 GB encoder against a 2.7 GB VAE. It does
+  not. The two log lines mean different things:
+
+  - `Requested to load X` (`comfy/model_management.py:952`) prints only when the model
+    is **not** already in `current_loaded_models`. One line is one real load.
+  - `Model X prepared for dynamic VRAM loading` (`comfy/model_patcher.py:2026`) fires on
+    every `load_models_gpu` call, resident or not. On an already-resident model that
+    pass re-casts the force-preloaded params and the named buffers — the 692 KB / 4572 KB
+    the line itself reports — keeps the existing vbar slots, and calls `prioritize()`.
+    The bulk of the weights live in aimdo's vbar and are not touched by it.
+
+  Counted against the original attachment: `Requested to load` appears **once**, with
+  eight VAE stages, eight TE stages and zero unloads. The post-change log has the same
+  shape with four of each. One load of each model, before and after. `free_memory` also
+  declines to unload a dynamic model on behalf of another dynamic model — "that works
+  on-demand."
+
+  What cannot be ruled out from a log is page-level eviction inside the vbar. That
+  happens per-op at `comfy/ops.py:166` via `vbar_fault`, is signature-checked, and
+  **emits no line at any log level**. VAE 2.7 GB + TE 15 GB is ~18 GB before
+  activations, so under VRAM pressure the grouping could genuinely reduce fault traffic.
+  That is the only mechanism under which this change saves real time, and it is
+  unmeasured — the reporter's GPU is unknown, and their before/after runs used different
+  window counts (8 x 106 frames vs 4 x 174).
+
+  The dominant cost in that run was the eight VAE encodes themselves (`0 encodes
+  reused`), which this change does not reduce.
+
+  The README paragraph corrected alongside the original entry was **right as written**
+  and has been restored.
 
 ## [Unreleased] — 0.97.2
 

@@ -31,6 +31,7 @@ the numbers cannot answer.
 
 import io as pyio
 import logging
+import queue
 import threading
 
 import torch
@@ -118,6 +119,98 @@ def _register_media_route():
 
 
 _register_media_route()
+
+# The encode runs on its own thread, so the sampler never waits for Pillow.
+#
+# An animated WebP is ONE file, so every chunk re-encodes the whole timeline so
+# far -- hundreds of ms at max_frames, on the thread that would otherwise be
+# starting the next chunk. The queue holds ONE pending job and the newest replaces
+# it: a preview one chunk behind is still a preview, a queue that grows delivers
+# frames later and later and never catches up. Latest-wins on this end matches
+# what the browser does on its end. One worker for the module, not one per
+# session; sessions are short-lived.
+_ENCODE_QUEUE = queue.Queue(maxsize=1)
+_ENCODER = None
+_ENCODER_LOCK = threading.Lock()
+
+
+def _ensure_encoder():
+    global _ENCODER
+    with _ENCODER_LOCK:
+        if _ENCODER is None or not _ENCODER.is_alive():
+            _ENCODER = threading.Thread(target=_encode_loop, name="mmh3-preview-encode",
+                                        daemon=True)
+            _ENCODER.start()
+
+
+def _encode_loop():
+    while True:
+        job = _ENCODE_QUEUE.get()
+        try:
+            _encode_and_send(job)
+        except Exception as error:
+            # The sampler cannot see this any more, so it must not be fatal here
+            # either: log, drop the frame, keep serving.
+            logging.warning("[MMH3LivePreview] frame dropped after an encode error: %s",
+                            error)
+        finally:
+            _ENCODE_QUEUE.task_done()
+
+
+def _submit(job):
+    """Queue a job, evicting a stale pending one rather than waiting."""
+    _ensure_encoder()
+    while True:
+        try:
+            _ENCODE_QUEUE.put_nowait(job)
+            return
+        except queue.Full:
+            try:
+                _ENCODE_QUEUE.get_nowait()
+                _ENCODE_QUEUE.task_done()
+            except queue.Empty:
+                pass
+
+
+def _encode_and_send(job):
+    """Worker side: frames -> bytes -> _MEDIA -> metadata event."""
+    from PIL import Image
+
+    if job["frames"]:
+        # The timeline, PLAYING. Every kept frame stands for `stride` real
+        # frames, so holding it for stride/fps seconds is real time -- which is
+        # the only way the preview tells you anything about pacing.
+        duration = max(1, int(round(1000.0 * job["stride"] / float(job["fps"]))))
+        pils = [Image.fromarray(
+            (f.numpy() * 255.0).astype("uint8")) for f in job["frames"]]
+        buf = pyio.BytesIO()
+        pils[0].save(buf, format="WEBP", save_all=True, append_images=pils[1:],
+                     duration=duration, loop=0, quality=job["quality"], method=0)
+        mime, w, h = "image/webp", pils[0].width, pils[0].height
+    else:
+        # Nothing banked yet: the step-by-step still, when that is switched on.
+        strip = _tile([job["live"]], job["height"])[0]         # [3,H,W]
+        arr = (strip.permute(1, 2, 0).numpy() * 255.0).astype("uint8")
+        image = Image.fromarray(arr)
+        buf = pyio.BytesIO()
+        image.save(buf, format="JPEG", quality=job["quality"])
+        mime, w, h = "image/jpeg", image.width, image.height
+
+    seq = _store_media(job["node_id"], buf.getvalue(), mime)
+    n = len(job["frames"])
+    job["server"].send_sync(EVENT, {
+        "node_id": job["node_id"],
+        "seq": seq,
+        "mime": mime,
+        "w": w,
+        "h": h,
+        "chunks": len(job["labels"]),
+        "total": job["chunk_count"],
+        "frames": n,
+        "seconds": round(n * job["stride"] / float(job["fps"]), 2),
+        "labels": job["labels"],
+        "live": job["live_label"],
+    }, job["client_id"])
 
 
 def _suppress_default_previews():
@@ -404,7 +497,12 @@ class PreviewSession:
             logging.warning("[MMH3LivePreview] disabled after an error: %s", error)
 
     def _send(self):
-        from PIL import Image
+        """Hand the current state to the encoder thread and return at once.
+
+        Snapshot, not reference: `self.frames` and `self.labels` are mutated by
+        the sampler thread after this returns. The tensors themselves are never
+        written again once made, so sharing them is safe.
+        """
         try:
             from server import PromptServer
         except ImportError:
@@ -414,44 +512,22 @@ class PreviewSession:
         if server is None:
             self.enabled = False
             return
-
-        if self.frames:
-            # The timeline, PLAYING. Every kept frame stands for `stride` real
-            # frames, so holding it for stride/fps seconds is real time -- which is
-            # the only way the preview tells you anything about pacing.
-            duration = max(1, int(round(1000.0 * self.stride / float(self.fps))))
-            pils = [Image.fromarray(
-                (f.numpy() * 255.0).astype("uint8")) for f in self.frames]
-            buf = pyio.BytesIO()
-            pils[0].save(buf, format="WEBP", save_all=True, append_images=pils[1:],
-                         duration=duration, loop=0, quality=self.quality, method=0)
-            mime, w, h = "image/webp", pils[0].width, pils[0].height
-        else:
-            # Nothing banked yet: the step-by-step still, when that is switched on.
-            shown = ([self.live] if self.live is not None else [])
-            if not shown:
-                return
-            strip = _tile(shown, self.height)[0]              # [3,H,W]
-            arr = (strip.permute(1, 2, 0).numpy() * 255.0).astype("uint8")
-            image = Image.fromarray(arr)
-            buf = pyio.BytesIO()
-            image.save(buf, format="JPEG", quality=self.quality)
-            mime, w, h = "image/jpeg", image.width, image.height
-
-        seq = _store_media(self.node_id, buf.getvalue(), mime)
-        server.send_sync(EVENT, {
+        if not self.frames and self.live is None:
+            return
+        _submit({
+            "server": server,
+            "client_id": server.client_id,
             "node_id": self.node_id,
-            "seq": seq,
-            "mime": mime,
-            "w": w,
-            "h": h,
-            "chunks": len(self.labels),
-            "total": self.chunk_count,
-            "frames": len(self.frames),
-            "seconds": round(len(self.frames) * self.stride / float(self.fps), 2),
+            "frames": list(self.frames),
+            "live": self.live,
+            "live_label": self.live_label,
             "labels": list(self.labels),
-            "live": self.live_label,
-        }, server.client_id)
+            "chunk_count": self.chunk_count,
+            "height": self.height,
+            "quality": self.quality,
+            "stride": self.stride,
+            "fps": self.fps,
+        })
 
 
 def begin_preview(model_patcher, chunk_count):

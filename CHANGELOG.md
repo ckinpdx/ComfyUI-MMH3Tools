@@ -9,7 +9,23 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
-## [Unreleased] — 0.99.1
+## [Unreleased] — 0.99.2
+
+### Changed
+
+- **MMH3 Timeline Preview encodes off the sampler thread.** An animated WebP is
+  one file, so every finished chunk re-encoded the whole timeline so far on the
+  thread that was about to start the next chunk — hundreds of ms of idle GPU per
+  chunk at `max_frames`, more with `live_steps` firing per step. `_send` now
+  snapshots the frames and hands them to a module-level daemon worker through a
+  one-slot queue; the newest job evicts a stale pending one rather than waiting,
+  so a slow encode leaves the preview at most one chunk behind and never builds
+  a backlog. Latest-wins on this end matches the browser end from 0.99.1. An
+  encode failure logs and drops that frame instead of disabling the session,
+  because the sampler can no longer see the exception. The decode stays on the
+  sampler thread — it needs the GPU and the latent. No inputs changed.
+
+## 0.99.1
 
 ### Fixed
 

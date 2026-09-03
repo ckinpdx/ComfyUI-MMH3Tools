@@ -1070,7 +1070,9 @@ a choice here — now lives in
   turn, so a large animated WebP on the socket would hold every client's progress
   events behind the slowest tab. Over HTTP it is latest-wins: reassigning the
   `<img>` aborts the load in flight, so a slow tab falls at most one frame behind and
-  never queues. (Since 0.99.1; earlier versions sent base64 in the event.)
+  never queues. (Since 0.99.1; earlier versions sent base64 in the event.) The
+  encode itself runs on a worker thread with a one-slot, newest-wins queue (0.99.2),
+  so the sampler does not wait for Pillow to re-encode the timeline after each chunk.
 
   Any error switches the preview off for the run rather than interrupting it.
 

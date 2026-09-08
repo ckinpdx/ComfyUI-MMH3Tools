@@ -19,6 +19,7 @@ from .nodes_looping_sampler import MMH3KeyframePlanner, MMH3LoopingSampler
 from .nodes_save import MMH3SizeCappedCopy, MMH3StreamingSave
 from .nodes_upscale import MMH3ChunkedPixelUpscale
 from .nodes_tokens import MMH3OfficialTokens
+from .nodes_viggle import MMH3CondSetFromViggle
 from .nodes_trim import (
     MMH3OutpaintLatent,
     MMH3SplitAV,
@@ -114,6 +115,7 @@ NODES = [
     MMH3Regenerate2KReference,
     MMH3CondSelect,
     MMH3CondToSet,
+    MMH3CondSetFromViggle,
     MMH3CondSetSpread,
     MMH3CondSetStripText,
     # MMH3Tools/reference

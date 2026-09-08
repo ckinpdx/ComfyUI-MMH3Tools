@@ -575,6 +575,17 @@ for any node is in its tooltip.
   replicates the same conditioning N times; 1 already covers any chunk count,
   since the sampler reuses the last entry.
 
+- **MMH3 Cond Set From Viggle** — adapt the cond_set from Viggle-Animate
+  Conditioning (H3, Windowed) for the looping sampler. Both packs emit core's
+  `minimax_refs` blocks, so the conditioning is already compatible and only the
+  socket type name differed. Viggle bakes each window's slice of the driving clip
+  into its own cond, so the two schedules must agree: this derives the
+  `chunk_frames`/`overlap_frames` that rebuild Viggle's spans, replans them the
+  way the sampler will, and reports whether the boundaries match. Wire both INT
+  outputs into the sampler. A differing schedule with the SAME chunk count is the
+  dangerous case — the sampler clamps its cond index and would render every chunk
+  against the wrong frames without complaint — so it is called out per chunk.
+
 - **MMH3 Cond Set Strip Text** — drop the prompt from every entry of a cond_set
   while the reference media rides through untouched. For a refine pass whose
   windows are **smaller than the chunk the prompt was written for**: core picks a

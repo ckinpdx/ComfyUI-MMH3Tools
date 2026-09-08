@@ -9,6 +9,35 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.101.0
+
+### Added
+
+- **MMH3 Cond Set From Viggle** — interop with
+  [ComfyUI-Viggle-Animate-H3](https://github.com/Saganaki22/ComfyUI-Viggle-Animate-H3).
+  Its windowed conditioning node and this pack's looping sampler independently
+  arrived at the same design — a cond_set of one conditioning per chunk, the
+  guider's positive replaced per chunk — and its reference blocks are the same
+  schema as ours, since both emit core's H3 `minimax_refs`. So the conditioning
+  needs no translation; the only thing blocking the wire was the socket type
+  name (`VIGGLE_COND_SET` vs `MMH3_COND_SET`).
+
+  The node does more than retype, because the spans are the real hazard. Viggle
+  bakes a per-window slice of the driving clip into each cond, so cond *i* is
+  correct only for *its* span. The sampler plans its own spans from
+  `chunk_frames`/`overlap_frames` and reads `conds[min(i, len(conds) - 1)]` — so
+  a schedule that differs but has the same chunk COUNT slips past the sampler's
+  only guard and conditions every chunk on the wrong frames, silently. This node
+  therefore derives the `chunk_frames`/`overlap_frames` that reproduce Viggle's
+  schedule, replans them through the sampler's own `_plan`, and reports whether
+  the spans come back identical. Wire the two INT outputs into the sampler and
+  the alignment is structural rather than remembered. A mismatch is reported per
+  chunk and logged, not raised.
+
+  Not yet tested against a live Viggle render: the compatibility is established
+  by matching block schemas and a span round-trip in `tests/test_viggle.py`, not
+  by a completed generation.
+
 ## [Unreleased] — 0.100.0
 
 ### Added

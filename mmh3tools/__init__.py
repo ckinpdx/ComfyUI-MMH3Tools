@@ -16,6 +16,7 @@ from .nodes_lint import MMH3PromptLint
 from .nodes_music import (MMH3LyricsSectionize, MMH3MusicCaptionSplit,
                           MMH3MusicCaptionSystemPrompt)
 from .nodes_looping_sampler import MMH3KeyframePlanner, MMH3LoopingSampler
+from .nodes_refmods import H3RefModCondSetApply
 from .nodes_save import MMH3SizeCappedCopy, MMH3StreamingSave
 from .nodes_upscale import MMH3ChunkedPixelUpscale
 from .nodes_tokens import MMH3OfficialTokens
@@ -111,6 +112,7 @@ NODES = [
     MMH3MusicCaptionSplit,
     MMH3LyricsSectionize,
     # MMH3Tools/conditioning
+    H3RefModCondSetApply,
     MMH3ReferenceMultiPrompt,
     MMH3Regenerate2KReference,
     MMH3CondSelect,

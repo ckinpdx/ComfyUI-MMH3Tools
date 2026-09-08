@@ -3,6 +3,9 @@
 MiniMax H3 latent tooling for ComfyUI — latent-domain conditioning and correct AV
 splicing for **chained long-form generation**.
 
+[Apply H3 RefMods to Cond Set](docs/refmods.md) injects a MiniMaxH3Mod bundle into
+every chunk's conditioning while keeping trailing control references in place.
+
 ## What has actually been run
 
 **`carry="mask"` is the tested path.** Every example workflow ships with it, and every

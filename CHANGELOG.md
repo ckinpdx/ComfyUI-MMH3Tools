@@ -9,6 +9,32 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.102.0
+
+### Added
+
+- **Apply H3 RefMods to Cond Set** (`H3RefModCondSetApply`) — cherry-picked from
+  [JalenBrunson's fork](https://github.com/Jalen-Brunson/ComfyUI-MMH3Tools/tree/h3-hybrid-resume),
+  his work, requested in the resource thread. Applies a MiniMaxH3Mod loader bundle
+  to every chunk's conditioning, inserting mod blocks before trailing control
+  references so control schedules' negative indexes stay valid. `retention` scales
+  each loader row's strength; unwired or all-zero is a passthrough.
+
+  Taken WITHOUT the rest of that branch (`MMH3HybridWindowSampler`,
+  `MMH3JointWindowSampler`, the resume nodes). The refmods commit is the branch
+  tip and sits on top of those, so the cherry-pick conflicted on `__init__.py` and
+  `README.md`; resolved to keep only the refmods import and paragraph.
+  `nodes_refmods.py` needs nothing from that work beyond `MMH3CondSet`.
+
+  The `mods` socket is typed `H3_REF_MODS` and duck-types `mod.ref_block()` with
+  no hard import, so the node loads with or without
+  [ComfyUI-MiniMaxH3Mod](https://github.com/Saganaki22/ComfyUI-MiniMaxH3Mod)
+  installed — but that pack is what feeds the input, and it is not installed here.
+
+  Its `node_id` is `H3RefModCondSetApply`, not `MMH3...`. Kept as-is so workflows
+  built against his branch keep loading; it is the second node id in the pack that
+  breaks the prefix, after `WhisperAlignmentToText`.
+
 ## [Unreleased] — 0.101.0
 
 ### Added

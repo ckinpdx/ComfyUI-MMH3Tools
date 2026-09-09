@@ -3,9 +3,6 @@
 MiniMax H3 latent tooling for ComfyUI — latent-domain conditioning and correct AV
 splicing for **chained long-form generation**.
 
-[Apply H3 RefMods to Cond Set](docs/refmods.md) injects a MiniMaxH3Mod bundle into
-every chunk's conditioning while keeping trailing control references in place.
-
 ## What has actually been run
 
 **`carry="mask"` is the tested path.** Every example workflow ships with it, and every
@@ -577,6 +574,18 @@ for any node is in its tooltip.
   the sampler without loading 20 GB to tokenize an empty string. `count`
   replicates the same conditioning N times; 1 already covers any chunk count,
   since the sampler reuses the last entry.
+
+- **Apply H3 RefMods to Cond Set** — inject a MiniMaxH3Mod bundle into every
+  chunk's conditioning. RefMods are reference images/videos packed into one
+  safetensors, so a likeness or concept reloads without re-encoding. By default
+  mods are inserted BEFORE trailing control blocks, which keeps control schedules'
+  negative indexes valid; `append_last` puts them after, and then those indexes
+  need adjusting. `retention` multiplies every loader row's strength (0 injects
+  nothing). An unwired or all-zero bundle is a passthrough. Mod references carry
+  no `<Picture N>` tag — prompt them by description. Needs the separate
+  [ComfyUI-MiniMaxH3Mod](https://github.com/Saganaki22/ComfyUI-MiniMaxH3Mod) pack
+  for the `mods` input; the node loads without it, but nothing can feed it.
+  See [docs/refmods.md](docs/refmods.md). From JalenBrunson's fork.
 
 - **MMH3 Cond Set From Viggle** — adapt the cond_set from Viggle-Animate
   Conditioning (H3, Windowed) for the looping sampler. Both packs emit core's

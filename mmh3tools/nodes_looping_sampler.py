@@ -69,6 +69,7 @@ from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
 from .nodes_loop import per_row_mask_is_continuous
 from .nodes_multiprompt import MMH3CondSet
 from .nodes_preview import begin_preview
+from .nodes_loop import masked_velocity_is_scaled
 from .nodes_windows import _audio_index_at, _plan, _window_frame_spans
 
 _GUIDE_KEYS = ("minimax_keyframes", "minimax_frame_count")
@@ -681,9 +682,11 @@ class MMH3LoopingSampler(io.ComfyNode):
                  "overlap %d latents (%d frames)"
                  % (n, "" if n == 1 else "s", length, latents_to_frames(length),
                     total_f, total_f / float(FPS), overlap, ov_frames),
-                 "carry %s, strength video %.2f / audio %.2f, noise seed %s"
+                 "carry %s, strength video %.2f / audio %.2f, noise seed %s, "
+                 "core scales masked velocity (#15988): %s"
                  % (carry, float(overlap_strength_video), float(overlap_strength_audio),
-                    getattr(noise, "seed", "?"))]
+                    getattr(noise, "seed", "?"),
+                    "yes" if masked_velocity_is_scaled() else "no")]
         if prior_t:
             lines.append("prior: %d latents (%d frames, %.2fs) kept verbatim; generating "
                          "from frame %d, carrying %d frames of it"

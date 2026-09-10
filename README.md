@@ -27,6 +27,26 @@ Note that current ComfyUI also raised its own floor to **`av>=17.0.0`**. If you 
 core and ComfyUI then fails to start with `cannot import name 'ColorPrimaries' from
 'av.video.reformatter'`, that is why — `pip install --upgrade "av>=17.0.0"`.
 
+**Verified on `v0.34.0-98-ga7b1d39d` (2026-09-09)** with `comfy-aimdo==0.5.3`,
+`comfy-kitchen==0.2.33`. Updating ComfyUI means updating those pinned components too:
+core does a module-level `import comfy_aimdo.malloc_graph`, which does not exist
+before aimdo 0.5.x, so core and aimdo cannot be moved independently.
+
+> ⚠️ **`RuntimeError: aimdo memory compile error`.** ComfyUI shipped a model compiler
+> (`comfy-aimdo` 0.5.x, opt-OUT) whose integration lives inside H3's own forward pass,
+> so H3 graphs hit it disproportionately. If a generation raises this — reported with
+> the ControlNet nodes in particular — launch with **`--disable-comfy-compiler`**
+> (which also forces `--disable-cuda-graphs`). It is a core issue, not a pack issue:
+> nothing in this pack references aimdo.
+
+> **#15988 changes what `carry="mask"` computes.** The model now scales masked rows'
+> velocity by the mask (`out *= denoise_mask`) to match the outer x0 conversion. The
+> pack does not require it and is not gated on it, but a render made before and after
+> that merge is not numerically the same run. `MMH3LoopingSampler`'s summary reports
+> `core scales masked velocity (#15988): yes/no` on every run so the two are
+> distinguishable in a log. What it does to output at intermediate
+> `overlap_strength` values has not been measured here.
+
 Everything this pack needs from upstream has merged:
 
 | PR | merged | needed by |
@@ -34,6 +54,7 @@ Everything this pack needs from upstream has merged:
 | [#15375](https://github.com/Comfy-Org/ComfyUI/pull/15375) per-token masking | 2026-08-18 | `MMH3SeedOverlap`, latent outpaint, and **`MMH3LoopingSampler` with `carry="mask"`** — the default |
 | [#15439](https://github.com/Comfy-Org/ComfyUI/pull/15439) guides at any frame | 2026-08-13 | `MMH3LoopingSampler` with `carry="keyframe"`, and any use of `keyframes` |
 | [#15808](https://github.com/Comfy-Org/ComfyUI/pull/15808) H3's seven special tokens | 2026-08-22 | nothing in the pack — it makes `MMH3OfficialTokens` redundant, see below |
+| [#15988](https://github.com/Comfy-Org/ComfyUI/pull/15988) masked-row velocity scaling | 2026-09-09 | nothing — but it CHANGES `carry="mask"` numerics, see below |
 
 On an older ComfyUI the pack does not pretend. `MMH3SeedOverlap` and the keyframe path
 **refuse to run**, and the looping sampler checks before it starts.

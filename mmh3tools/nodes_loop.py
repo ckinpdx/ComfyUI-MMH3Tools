@@ -96,6 +96,32 @@ def per_row_mask_is_continuous():
     return hasattr(mm, "mask_row_values")
 
 
+def masked_velocity_is_scaled():
+    """Whether #15988 scales masked rows' velocity in MiniMaxH3Model.forward.
+
+    Merged 2026-09-09. The forward now ends with `out[0] = out[0] * denoise_mask`
+    (and the audio equivalent); before it, the velocity returned for rows the mask
+    preserves was not scaled by that mask. Its comment upstream: \"Masked rows predict
+    at mask * sigma; scale their velocity to match the outer x0 conversion.\"
+
+    Reported, never gated on: this is a core CORRECTNESS fix, not a feature the pack
+    requires. It is detected only so that two runs either side of a core update are
+    distinguishable in the log -- a render that changes after updating has a name
+    instead of being a mystery. What it does to output at intermediate
+    overlap_strength values has NOT been measured here.
+
+    Source-inspected rather than symbol-checked because nothing was renamed; the
+    same technique as _guides_available. `* denoise_mask` appears in `forward` only
+    after the merge -- before it, `denoise_mask` was a pass-through kwarg there.
+    """
+    try:
+        import inspect
+        import comfy.ldm.minimax.model as mm
+        return "* denoise_mask" in inspect.getsource(mm.MiniMaxH3Model.forward)
+    except Exception:
+        return False
+
+
 def _ones_mask_for(t):
     """A 1-channel all-denoise mask matching t's batch, temporal and spatial extent.
 

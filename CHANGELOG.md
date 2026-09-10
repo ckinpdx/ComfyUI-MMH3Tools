@@ -9,6 +9,40 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.103.0
+
+### Added
+
+- **`masked_velocity_is_scaled()`** (`nodes_loop`) — detects ComfyUI
+  [#15988](https://github.com/Comfy-Org/ComfyUI/pull/15988) (merged 2026-09-09), which
+  makes `MiniMaxH3Model.forward` scale masked rows' velocity by the denoise mask.
+  Source-inspected, the same way `_guides_available` detects #15439; `* denoise_mask`
+  appears in `forward` only after the merge.
+
+  It is **reported, never gated on**. This is a core correctness fix, not something
+  the pack requires — but it changes what `carry="mask"` computes, so
+  `MMH3LoopingSampler`'s run summary now ends its carry line with
+  `core scales masked velocity (#15988): yes/no`. Two runs either side of a core
+  update are otherwise indistinguishable in a log, which is the same reason the carry
+  settings are in that summary at all. What #15988 does to output at intermediate
+  `overlap_strength` values has NOT been measured.
+
+- `tests/test_core_probes.py` — asserts all five core-capability probes return a bool
+  rather than raising (each swallows and returns False by contract; an escaping
+  exception would take a node down), and cross-checks the new one against the
+  installed source rather than trusting it.
+
+### Compatibility
+
+- **Verified on ComfyUI `v0.34.0-98-ga7b1d39d` (2026-09-09)** with `comfy-aimdo==0.5.3`
+  and `comfy-kitchen==0.2.33`. Suite: 26 pass, 2 pre-existing failures unchanged
+  across the update (`test_looping_sampler.py`, `test_multiprompt.py`).
+- README now records that core and `comfy-aimdo` cannot move independently — core does
+  a module-level `import comfy_aimdo.malloc_graph`, absent before aimdo 0.5.x — and
+  documents `--disable-comfy-compiler` for `RuntimeError: aimdo memory compile error`,
+  which H3 graphs hit disproportionately because the compiler integration sits inside
+  H3's own forward pass. Neither is a pack issue; nothing here references aimdo.
+
 ## [Unreleased] — 0.102.0
 
 ### Added

@@ -426,7 +426,8 @@ def write_temp_wav(audio):
 def _to_mono_16k(audio):
     """ComfyUI AUDIO -> float32 mono numpy at 16 kHz."""
     import torch
-    import torchaudio
+
+    from .common import resample_audio
 
     wav = audio["waveform"]
     sr = int(audio["sample_rate"])
@@ -435,8 +436,7 @@ def _to_mono_16k(audio):
     if wav.ndim == 2 and wav.shape[0] > 1:
         wav = wav.mean(dim=0, keepdim=True)
     wav = wav.reshape(-1).to(torch.float32)
-    if sr != SAMPLE_RATE:
-        wav = torchaudio.functional.resample(wav, sr, SAMPLE_RATE)
+    wav = resample_audio(wav, sr, SAMPLE_RATE)
     return wav.cpu().numpy(), float(wav.shape[-1]) / SAMPLE_RATE
 
 

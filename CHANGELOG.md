@@ -9,6 +9,47 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.104.0
+
+### Fixed
+
+- **The pack no longer imports torchaudio.** ComfyUI removed it as a dependency in
+  [#16457](https://github.com/Comfy-Org/ComfyUI/pull/16457) (2026-09-21) and
+  reimplemented the one function used here as `comfy.audio.resample`. Two nodes did
+  `import torchaudio` unconditionally — `MMH3ForcedAlign` (`_to_mono_16k`) and
+  `MMH3MusicAnalysis` — so on a clean current ComfyUI, where nothing installs
+  torchaudio any more, both would have raised ImportError at execution. The failure
+  would not have shown up here: other custom nodes still pull torchaudio in, so a
+  machine that has been running a while keeps working while a fresh install does not.
+
+  New `common.resample_audio(wav, orig_sr, new_sr)`: core's resampler first,
+  torchaudio only as a fallback for pre-#16457 cores, so both sides of the removal
+  work and the pack still declares no dependencies of its own. Identical rates are a
+  passthrough.
+
+  The substitution is **numerically free** — core's version is the same
+  bandlimited-sinc algorithm with the same defaults, and is bit-identical to
+  `torchaudio.functional.resample` (max|diff| 0.0) at 44k→16k, 48k→16k and 44k→22k on
+  both 1-D and `[1, T]` inputs.
+
+- `tests/test_resample.py` — covers the passthrough, the bit-identical cross-check
+  against torchaudio, and the **fallback branch**, which is dead code on any core that
+  has `comfy.audio.resample` and so is forced by hiding the attribute.
+
+### Compatibility
+
+- **Verified on ComfyUI `v0.34.0-200-g79be670e` (2026-09-25)** with `comfy-aimdo==0.5.5`,
+  `comfy-kitchen==0.2.35`, frontend 1.53.6, templates 0.11.70, embedded-docs 0.5.12.
+  Suite: 27 pass, the same 2 pre-existing failures.
+- The 102 commits from the previous baseline touched the H3 **VAE** (tile blending, a
+  fused-kernel rewrite, an offloaded-`qk_norm_scale` crash fix) and
+  `MiniMaxH3FunControlPatch`. Nothing touched `samplers.py`, `nested_tensor.py`,
+  `node_helpers.py` or `PackedLayout`, and the `* denoise_mask` line the #15988 probe
+  keys on is byte-identical.
+- Upstream also made `--fast-disk` **auto-enable** on fast NVMe
+  ([#16333](https://github.com/Comfy-Org/ComfyUI/pull/16333)), with a new
+  `--disable-fast-disk` to opt out. Another silently-on default, like the compiler.
+
 ## [Unreleased] — 0.103.0
 
 ### Added

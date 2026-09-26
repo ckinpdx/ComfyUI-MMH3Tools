@@ -27,8 +27,15 @@ Note that current ComfyUI also raised its own floor to **`av>=17.0.0`**. If you 
 core and ComfyUI then fails to start with `cannot import name 'ColorPrimaries' from
 'av.video.reformatter'`, that is why — `pip install --upgrade "av>=17.0.0"`.
 
-**Verified on `v0.34.0-98-ga7b1d39d` (2026-09-09)** with `comfy-aimdo==0.5.3`,
-`comfy-kitchen==0.2.33`. Updating ComfyUI means updating those pinned components too:
+**Verified on `v0.34.0-200-g79be670e` (2026-09-25)** with `comfy-aimdo==0.5.5`,
+`comfy-kitchen==0.2.35`.
+
+**No torchaudio needed.** ComfyUI dropped torchaudio as a dependency in
+[#16457](https://github.com/Comfy-Org/ComfyUI/pull/16457) (2026-09-21). This pack used
+it in two nodes and no longer does: `resample_audio()` prefers core's own
+`comfy.audio.resample` and falls back to torchaudio only on a pre-#16457 core, so
+MMH3 Forced Align and MMH3 Music Analysis work on a clean install either way. The
+substitution is bit-identical on the conversions involved (see `tests/test_resample.py`). Updating ComfyUI means updating those pinned components too:
 core does a module-level `import comfy_aimdo.malloc_graph`, which does not exist
 before aimdo 0.5.x, so core and aimdo cannot be moved independently.
 

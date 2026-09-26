@@ -196,6 +196,35 @@ def append_cond_list(conditioning, key, items):
     return out
 
 
+def resample_audio(wav, orig_sr, new_sr):
+    """Resample a waveform, preferring core's resampler and falling back to torchaudio.
+
+    ComfyUI REMOVED torchaudio as a dependency in #16457 (2026-09-21) and
+    reimplemented the one function this pack used as `comfy.audio.resample` -- the
+    same bandlimited-sinc algorithm with the same defaults (lowpass_filter_width=6,
+    rolloff=0.99, sinc_interp_hann). Verified bit-identical to
+    torchaudio.functional.resample on 1-D and [1, T] inputs at 44k->16k, 48k->32k
+    and 44k->22k (max|diff| 0.0), which are the conversions this pack performs.
+
+    Unconditionally importing torchaudio would turn MMH3ForcedAlign and
+    MMH3MusicAnalysis into an ImportError on a clean current ComfyUI, where nothing
+    installs it any more. Core first, torchaudio second, so both sides of that
+    removal work and this pack still declares no dependencies of its own.
+    """
+    orig_sr, new_sr = int(orig_sr), int(new_sr)
+    if orig_sr == new_sr:
+        return wav
+    try:
+        import comfy.audio
+        fn = getattr(comfy.audio, "resample", None)
+    except ImportError:
+        fn = None
+    if fn is not None:
+        return fn(wav, orig_sr, new_sr)
+    import torchaudio                    # pre-#16457 cores only
+    return torchaudio.functional.resample(wav, orig_sr, new_sr)
+
+
 def evict_text_encoder(clip, tag):
     """Drop a CLIP's weights from VRAM once the last prompt has been encoded.
 

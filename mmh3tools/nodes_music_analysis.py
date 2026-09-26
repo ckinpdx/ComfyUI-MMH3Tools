@@ -149,7 +149,8 @@ class MMH3MusicAnalysis(io.ComfyNode):
     @classmethod
     def execute(cls, audio, beats_per_bar=4) -> io.NodeOutput:
         import torch
-        import torchaudio
+
+        from .common import resample_audio
 
         wav = audio["waveform"]
         sr = int(audio["sample_rate"])
@@ -158,8 +159,7 @@ class MMH3MusicAnalysis(io.ComfyNode):
         if wav.ndim == 2 and wav.shape[0] > 1:
             wav = wav.mean(dim=0, keepdim=True)
         wav = wav.reshape(-1).to(torch.float32)
-        if sr != ANALYSIS_SR:
-            wav = torchaudio.functional.resample(wav, sr, ANALYSIS_SR)
+        wav = resample_audio(wav, sr, ANALYSIS_SR)
         samples = wav.cpu().numpy()
 
         data = analyse(samples, ANALYSIS_SR)

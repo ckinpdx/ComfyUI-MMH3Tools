@@ -9,6 +9,22 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.107.0
+
+### Added
+
+- **`mmh3tools.live`**, a Python API (not a node) for rendering a talking head **chunk by
+  chunk**, for real-time callers such as a live avatar. `load_model` (UNETLoader + sigma
+  shift 12/3 + comfy kitchen attention), `load_vae` (as VAELoaderKJ main_device fp16),
+  `build_conditioning` (MMH3ReferenceMultiPrompt with `ref_image_size` match), and
+  `LiveH3.render(audio)`: one chunk of 48 kHz mono audio in, that chunk's new frames out.
+  Each window carries the previous one's last 2 latents at `carry_strength` (default 0.6),
+  colour-matched in latent space to the first window (0.106.0's `first_chunk_latent`), and
+  pins the speech, encoded with 1 s of left context. Windows of 39 or 56 frames (any
+  17j+5 from 22). Speeds and the recipe's evidence in [`docs/live.md`](docs/live.md). The
+  pack does not import it, so nothing changes for the nodes or saved workflows. Tests in
+  `tests/test_live.py` (stubbed sampler and VAE).
+
 ## [Unreleased] — 0.106.0
 
 ### Added

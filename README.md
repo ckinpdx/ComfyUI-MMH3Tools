@@ -1689,6 +1689,18 @@ needs **#15439**, and the Looping Sampler's `carry="keyframe"` is it. The
 `keyframe-anchors` branch reached the same place with monkeypatches and is superseded
 now that core carries the PR. Not yet run against real weights.
 
+## Live streaming API (`mmh3tools.live`, 0.107.0)
+
+A Python API, not a node: renders a talking head **one chunk at a time** for callers that
+receive audio as it is spoken and must return frames before the next chunk is due (a live
+avatar). It packages the Looping Sampler's per-chunk work with the recipe that held over a
+20 s chain: a 2-latent carry at strength 0.6, the latent colour match to the first window,
+and the speech pinned. `load_model` / `load_vae` / `build_conditioning` set it up;
+`LiveH3.render(audio)` takes one chunk of 48 kHz mono audio and returns that chunk's new
+frames. On an RTX 5090 at 512x512, 2 steps, a 56-frame window renders ~2.1 s of video in
+~1.7 s. The pack does not import it, so it changes nothing for the nodes. Reference:
+[`docs/live.md`](docs/live.md).
+
 ## Grid reference
 
 | | relation |

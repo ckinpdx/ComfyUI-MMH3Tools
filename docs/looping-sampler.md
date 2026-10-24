@@ -151,6 +151,53 @@ transition is a step; if the step shows, the lever is `overlap_frames` and
 **This shifted every later widget**, so saved workflows built before 0.73.0 will
 rebind `sampling_start_step` onward and need re-checking.
 
+### Colour-matched carry — `carry_color_match` (0.106.0)
+
+The carry is what keeps a chain continuous, and it is also how colour error
+compounds: chunk N+1 is conditioned on chunk N's tail, so whatever cast that tail
+picked up becomes the starting point for the next one, which adds its own. On a
+static shot nothing in the picture changes enough to reset it, and the clip "cooks"
+(saturation and warmth climbing chunk after chunk).
+
+SoulX-FlashHead streams indefinitely without this, because it never carries raw
+output. It decodes each chunk, colour-matches the frames to its reference in Lab,
+and re-encodes those as the next chunk's motion frames. `carry_color_match` does the
+same to this node's carry:
+
+1. After chunk 0 renders, its frames are decoded once and their Lab mean and spread
+   per channel become the **anchor** (`first_chunk`).
+2. After every chunk, the span the next chunk will carry is decoded. Each frame's L,
+   a and b are shifted and scaled onto the anchor's statistics, then blended with
+   the original by `carry_color_strength`.
+3. The result is re-encoded and written back over that span of the master. Both
+   carry routes slice the carry out of the master, so both pick it up.
+
+Only the carried span is touched. The frames of a chunk before its tail stay as
+sampled, which is why a small colour step can show at a seam when a chunk had
+drifted (§10). The span is decoded and re-encoded as a clip of its own. Windows
+start on latent phase 0, so its first latent is a 1-frame token both in the master
+and in the next chunk, and the round trip matches how the next chunk reads it. A
+carry that is not a whole clip (5k+2 latents) cannot be round-tripped that way. It
+is left as sampled and the report says so. The planner never produces one: its windows
+start on phase 0 and are 5k+2 long, so every carry is too, including the clamped last
+window's longer one (checked 2026-10-23 for overlaps of 5, 22 and 68 frames: carries
+of 2, 7 and 17 latents, and 37, 47 and 107 on clamped last windows).
+
+The report adds the setting to the summary and, per chunk, the tail's drift from
+the anchor **before** correction (`drift dE`, CIE76 distance of the Lab means;
+about 2.3 is a just-noticeable difference). A run that hardly drifts shows small
+numbers there, and the correction is nearly a no-op.
+
+**`first_chunk_latent`** does the same transfer on the latents, with no decode or
+encode and no `vae`. Each carried latent frame's per-channel mean and spread (over
+height and width) are moved to chunk 0's latents. H3 packs a 1-frame token at the
+start of every 5-latent group and 4-frame tokens after it, so the two kinds are
+anchored separately, and the carry span and chunk 0 both start on group phase 0.
+The report's per-chunk drift is then `drift N sd`: how far the frames' channel
+means sat from the anchor, in anchor standard deviations. It costs nothing
+measurable and avoids the VAE round trip, which has its own cost (§10); its seam
+step is larger.
+
 ---
 
 ## 3b. Windowing the schedule
@@ -462,6 +509,7 @@ not written down anywhere, including here.
 | the tail of every chunk drifts off-prompt | not `phase2_guider` — its positive is replaced per chunk. Look at the cond_set |
 | the reference video restarts from its beginning on every chunk | fewer prompts than windows, so the cond list was short and every chunk fell back to window 0. Fixed in **0.91.0**, which broadcasts one prompt across all windows and refuses any other mismatch. On an older build, write one prompt per chunk |
 | a chunk is conditioned on the wrong footage | preview the reference node's **`ref_windows`** output — two frames per chunk, first and last of its span. If they do not advance, `chunk_frames`/`overlap_frames` here do not match the sampler's |
+| a long static shot "cooks": saturation, warmth and contrast climb chunk after chunk | `carry_color_match` = `first_chunk_latent` or `first_chunk` (§3, §10). On its own it holds colour, not identity or detail. With `overlap_strength_video` lowered to 0.6 as well, one 20 s test held all three (§10) |
 
 ---
 
@@ -474,6 +522,79 @@ not written down anywhere, including here.
   older graph may still be sitting on 1.0. The tooltip previously asserted that
   lipsync wanted 1.0 — that was a guess, and these runs contradict it.
 - **The T2VA carry works.** Same run, `carry="mask"`, three-field format.
+- **`carry_color_match` stops the cook; identity still drifts.** Measured
+  2026-10-23. 20 s static talking head, Ref2VA with one face reference: FastH3 Omni
+  NVFP4, 512x512, 4 steps, euler, cfg 1, `chunk_frames` 34 / `overlap_frames` 5 (28
+  chunks of ~17 new frames, 2-latent carry), `carry="mask"` 1.0 / 0.95, same seed.
+  Per 2 s: mean HSV saturation (0–255) and mean R−B over the centre 40% (the face).
+
+  | | 0 s | 4 s | 10 s | 14 s | 18 s | 20 s |
+  |---|---|---|---|---|---|---|
+  | saturation, off | 56 | 73 | 97 | 85 | 102 | 80 |
+  | saturation, `first_chunk` | 56 | 58 | 55 | 57 | 58 | 57 |
+  | face R−B, off | 54 | 59 | 100 | 90 | 106 | 87 |
+  | face R−B, `first_chunk` | 54 | 51 | 56 | 50 | 48 | 48 |
+
+  Off, the face goes red and the hair blue by 10 s. Matched, the colour holds for
+  the whole clip, but the face itself still changes by 15–20 s (rounder, different
+  brows and eye shape, over-crisp hair). Colour is one drift; identity is another.
+  Cost: 1.4 → 2.4 s per chunk (0.4 s decode + 0.5 s encode per carry, mostly
+  ComfyUI's per-call VAE staging, not the 5 frames' arithmetic). Seams: the largest
+  frame-to-frame colour jump was 13.6 (sum of RGB mean changes) against a median
+  0.9, and every one of the eight largest fell on a chunk seam. That is the
+  corrected carry meeting the uncorrected frames before it. Off, the largest jumps
+  were 33 and 29, at frames 244 and 448, not on seams: the sudden saturation drops
+  just after 10 s and 18 s in the table.
+- **Colour match plus `overlap_strength_video` 0.6 held colour, identity and
+  detail for the whole 20 s.** Measured 2026-10-23, same chain and seed as above,
+  colour match `first_chunk` at strength 1. Face sharpness is the Laplacian variance
+  of the face's luma, averaged over each 4 s; it climbing means overbake (crunchy
+  skin and hair).
+
+  | carry video strength | face sharpness per 4 s | seam colour jump, mean / max | look at 20 s |
+  |---|---|---|---|
+  | 1.0, colour off | 177 254 193 200 224 | 2.9 / 5.2 | red face, blue hair |
+  | 1.0 | 152 233 238 312 331 | 4.9 / 13.6 | colour right, face changed, crunchy |
+  | 0.8 | 120 142 115 186 241 | 7.2 / 20.9 | blotchy at 15 s, partly recovers |
+  | **0.6** | **103 88 86 90 94** | 5.4 / 10.7 | **matches 0 s** |
+  | 1.0, colour strength 0 | 154 244 308 165 256 | 13.5 / 17.3 | worst: red eyes, distorted |
+  | 0.6, colour off | 139 155 195 196 230 | 2.0 / 4.2 | face holds; blue hair, red cheeks, contrast up |
+  | 0.6, colour strength 0 | 101 73 79 83 84 | 12.8 / 15.8 | face holds; pink-purple cast, soft |
+
+  The last two rows split the work. The **0.6 carry is what holds the face**: the
+  face stays on model with or without the colour step. The **colour match is what
+  holds the colour**: without it, 0.6 still cooks, more slowly than 1.0 (saturation
+  59 → 80 against 62 → 93, 4 s means). The decode and re-encode is also what
+  softens the image (sharpness ~80–90 whenever it runs at 0.6). Without it,
+  sharpness climbs with the cook. Sharpness is confounded by contrast here, so read
+  it alongside the look column. 0.6 with colour off had the smallest seams, the
+  most mouth motion (7.1 against 5.0) and no VAE cost (52.7 s against ~76 s for the
+  chain).
+- **`first_chunk_latent` matches the pixel route's colour at no cost, and keeps
+  more detail.** Measured 2026-10-23, same chain and seed, carry 0.6, strength 1.
+  Per 4 s:
+
+  | carry 0.6 with | saturation | face R−B | contrast | sharpness | seam jump mean / max | s per chunk |
+  |---|---|---|---|---|---|---|
+  | colour off | 59 → 80 | 59 → 73 | 53 → 73 | 139 → 230 | 2.0 / 4.2 | 1.43 |
+  | `first_chunk` (pixel) | 56 → 55 | 56 → 56 | 50 flat | 103 → 94 | 5.4 / 10.7 | 2.4 |
+  | `first_chunk_latent` | 56 → 54 | 55 → 55 | 51 flat | 131 → 139 | 7.6 / 16.1 | 1.41 |
+
+  Colour and face held as with the pixel route, the image stayed nearer chunk 0's
+  crispness (chunk 0 ~155), and mouth motion was 5.9 against 5.0. The cost is the
+  seam: the largest step of any 0.6 run, because only the carried latents are moved
+  and the frames before them are not.
+  At 0.6 the carried frames are partly redrawn under the current chunk's
+  conditioning instead of copied, which is the likely reason each handoff passes on
+  less of the previous chunk's error (not separately tested). She did not go stiff: mouth motion 5.0 against 5.5 at 1.0 (mean
+  absolute frame-to-frame luma change, seams excluded), head motion about equal.
+  The image is a little softer than chunk 0 (sharpness ~90 against ~155), and the
+  seam step is about twice the uncorrected one. The last row is the decode and
+  re-encode with no colour change. It is worse than not touching the carry at all,
+  so the round trip itself costs something, and at strength 1 the colour match was
+  covering for it. One seed, one static shot, FastH3 at 4 steps, 512x512, so this
+  is a lead, not a recipe. Long-chunk 10-step runs (a handful of handoffs instead of
+  28) are untested.
 
 ## 11. Not yet measured
 

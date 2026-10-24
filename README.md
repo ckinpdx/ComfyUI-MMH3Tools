@@ -1080,6 +1080,27 @@ a choice here — now lives in
   `carry="mask"`. Unit-tested against a stubbed sampler
   (`tests/test_guide_video.py`); not yet run on a real render.
 
+  **`carry_color_match`** (0.106.0) is SoulX-FlashHead's anti-drift step, applied to
+  the carry. A long chain "cooks": each chunk inherits the last one's colour error
+  through the carried latents and adds its own. With `first_chunk`, chunk 1's
+  decoded frames become the colour anchor. After every chunk, the frames the next
+  chunk will carry are decoded, moved onto the anchor's Lab mean and spread frame by
+  frame, re-encoded and written back as the carry. `first_chunk_latent` does the same
+  on the latents themselves (per channel, no `vae`, no extra time).
+  `carry_color_strength` blends between as-sampled (0) and fully matched (1). Off by
+  default.
+
+  On a 20 s static talking head it held saturation at 55–60 where the uncorrected
+  chain climbed 56 → 102, and the face's red-minus-blue at 48–56 where it climbed
+  54 → 106. On its own it does **not** hold identity: the face still drifts by
+  15–20 s. With `overlap_strength_video` lowered to **0.6** as well, the same chain
+  kept her face and detail to 20 s, at the price of a slightly softer image and a
+  larger colour step at seams (one seed, one shot so far). The pixel route costs one
+  small decode and encode per chunk (~0.9 s at 512x512); the latent route held colour
+  as well at no cost and kept more detail, with a larger seam step. Measurements and
+  method in
+  [`docs/looping-sampler.md`](docs/looping-sampler.md) §3 and §10.
+
 - **MiniMax H3 Keyframe Planner** — end-anchored keyframe indices for a chained run,
   ported from LTXAVTools' planner. Frame 0 opens, each chunk travels to a keyframe at
   the last frame **it renders**, the final one ends on `-1`. Start-anchoring instead

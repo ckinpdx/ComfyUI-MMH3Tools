@@ -68,6 +68,7 @@ from comfy.nested_tensor import NestedTensor
 
 from comfy_extras.nodes_custom_sampler import SamplerCustomAdvanced, SplitSigmas
 
+from .color_carry import anchor_stats, latent_anchor_stats, match_carry, match_carry_latent
 from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
                      LATENT_BASE, VAE_SPATIAL, VIDEO_T_DIM,
                      frame_at_latent, frames_to_audio_t, latents_to_frames,
@@ -538,10 +539,11 @@ class MMH3LoopingSampler(io.ComfyNode):
                 # correctly in practice, so the socket is withheld from the schema
                 # rather than deleted: `execute` still accepts `prior_av_latent=None`
                 # and the prepend/pad/phase implementation below is untouched.
-                # Restore by MOVING it to the end of this list, after guide_video
-                # (added 0.105.0 while this was hidden). Uncommenting it in place
-                # would insert it ahead of guide_video and shift that socket in
-                # saved graphs.
+                # Restore by MOVING it to the end of this list, after
+                # carry_color_strength (guide_video was added 0.105.0 and the
+                # carry colour inputs 0.106.0 while this was hidden). Uncommenting
+                # it in place would insert it ahead of them and shift guide_video's
+                # socket in saved graphs.
                 # io.Latent.Input(
                 # "prior_av_latent", optional=True,
                 # tooltip="An already-rendered AV latent to continue from. It is copied "
@@ -574,6 +576,29 @@ class MMH3LoopingSampler(io.ComfyNode):
                             "source's sound, use use_input_audio upstream.\n\n"
                             "Not with carry='keyframe' or `keyframes`: both would put a "
                             "second guide on the same frames."),
+                io.Combo.Input(
+                    "carry_color_match", options=["off", "first_chunk", "first_chunk_latent"],
+                    default="off", optional=True,
+                    tooltip="Colour-correct the carried latents before each next chunk "
+                            "(SoulX-FlashHead's anti-drift step). Only the carry is "
+                            "changed; every other frame stays as sampled.\n\n"
+                            "off: carry as sampled.\n"
+                            "first_chunk: the frames the next chunk will carry are "
+                            "decoded, each frame's Lab mean and spread are moved to "
+                            "chunk 1's decoded frames, and the result is re-encoded and "
+                            "written back. Needs `vae`; one small decode and encode per "
+                            "chunk. Skipped (and reported) when the carry is not a whole "
+                            "clip length (5k+2 latents).\n"
+                            "first_chunk_latent: the same transfer on the latents, no "
+                            "VAE: each carried latent frame's per-channel mean and "
+                            "spread are moved to chunk 1's latents, with 1-frame and "
+                            "4-frame tokens anchored separately."),
+                io.Float.Input(
+                    "carry_color_strength", default=1.0, min=0.0, max=1.0, step=0.05,
+                    optional=True,
+                    tooltip="Blend between the carry as sampled (0) and fully "
+                            "colour-matched (1). Used only when carry_color_match is "
+                            "not off."),
             ],
             outputs=[
                 io.Latent.Output(display_name="latent"),
@@ -589,10 +614,16 @@ class MMH3LoopingSampler(io.ComfyNode):
                 phase2_start_step=0, phase2_sampler=None, phase2_guider=None,
                 keyframes=None, keyframe_indices="", vae=None,
                 prior_av_latent=None, denoise_mask=None, denoise_mask_mode="max",
-                audio_denoise_mask=None, guide_video=None) -> io.NodeOutput:
+                audio_denoise_mask=None, guide_video=None, carry_color_match="off",
+                carry_color_strength=1.0) -> io.NodeOutput:
         conds = (cond_set or {}).get("conds") or []
         if not conds:
             raise ValueError("MMH3LoopingSampler: cond_set holds no conditioning.")
+        color_on = (carry_color_match or "off") != "off"
+        color_latent = carry_color_match == "first_chunk_latent"
+        if color_on and not color_latent and vae is None:
+            raise ValueError("MMH3LoopingSampler: carry_color_match='first_chunk' needs the "
+                             "H3 video vae ('first_chunk_latent' does not).")
 
         if carry == "keyframe" and not _guides_available():
             raise RuntimeError(
@@ -727,6 +758,12 @@ class MMH3LoopingSampler(io.ComfyNode):
                  % (carry, float(overlap_strength_video), float(overlap_strength_audio),
                     getattr(noise, "seed", "?"),
                     "yes" if masked_velocity_is_scaled() else "no")]
+        if color_on:
+            lines.append("carry colour match: %s, strength %.2f (each chunk's tail is %s "
+                         "before it is carried)"
+                         % (carry_color_match, float(carry_color_strength),
+                            "matched per latent channel" if color_latent else
+                            "decoded, matched in Lab and re-encoded"))
         if prior_t:
             lines.append("prior: %d latents (%d frames, %.2fs) kept verbatim; generating "
                          "from frame %d, carrying %d frames of it"
@@ -905,6 +942,7 @@ class MMH3LoopingSampler(io.ComfyNode):
         # is DISCOVERED here rather than owned: no wiring, no object, no branch that
         # can change a render.
         preview = begin_preview(getattr(guider, "model_patcher", None), len(windows))
+        anchor = None    # carry colour anchor: chunk 0's decoded frames, taken after it renders
 
         for i, w in enumerate(windows):
             idx = w.index_list
@@ -1012,11 +1050,41 @@ class MMH3LoopingSampler(io.ComfyNode):
             if out_a is not None and da is not None:
                 out_a[:, :, :, a0:a1] = da.to(out_a.dtype)
 
-            lines.append("  chunk %d: prompt %d, frames %d-%d, %d carried%s%s"
+            # Colour-matched carry (SoulX-FlashHead): the next chunk reads its carry
+            # out of out_v, so correcting it here, in place, is all it takes -- both
+            # carry modes slice it from there. The span is decoded and re-encoded as a
+            # clip of its own, which is how the next chunk sees it: windows start on
+            # latent phase 0, so its first latent is a 1-frame token either way.
+            cc_note = ""
+            if color_on and i + 1 < n:
+                if anchor is None:
+                    anchor = (latent_anchor_stats(out_v[:, :, v0:v1]) if color_latent
+                              else anchor_stats(vae, out_v[:, :, v0:v1]))
+                nv0 = windows[i + 1].index_list[0] + offset
+                nv1 = min(windows[i + 1].index_list[-1] + 1 + offset, total_t)
+                nc = min(max(0, v1 - nv0), nv1 - nv0)
+                if nc and color_latent:
+                    z, drift = match_carry_latent(out_v[:, :, nv0:nv0 + nc], anchor,
+                                                  float(carry_color_strength))
+                    out_v[:, :, nv0:nv0 + nc] = z
+                    cc_note = ", tail latent-matched (drift %.2f sd)" % drift
+                elif nc and nc % LATENTS_PER_GROUP == LATENT_BASE:
+                    z, drift = match_carry(vae, out_v[:, :, nv0:nv0 + nc], anchor,
+                                           float(carry_color_strength))
+                    if z is not None:
+                        out_v[:, :, nv0:nv0 + nc] = z.to(out_v.device, out_v.dtype)
+                        cc_note = ", tail colour-matched (drift dE %.1f)" % drift
+                    else:
+                        cc_note = ", tail NOT colour-matched (re-encode changed shape)"
+                elif nc:
+                    cc_note = (", tail NOT colour-matched (%d carried latents is not a "
+                               "whole clip, 5k+2)" % nc)
+
+            lines.append("  chunk %d: prompt %d, frames %d-%d, %d carried%s%s%s"
                          % (i, min(i, len(conds) - 1), spans[i][0], spans[i][1],
                             frame_at_latent(carried) if carried else 0,
                             ", %d keyframe(s)" % len(guides_by_chunk[i])
-                            if guides_by_chunk.get(i) else "", gv_note))
+                            if guides_by_chunk.get(i) else "", gv_note, cc_note))
             if preview is not None:
                 preview.chunk(i, dv, v0, v1, da)
             logging.info("[MMH3LoopingSampler] chunk %d/%d done", i + 1, n)

@@ -9,6 +9,40 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.106.0
+
+### Added
+
+- **MiniMax H3 Looping Sampler: `carry_color_match` / `carry_color_strength`**, a
+  colour-matched carry ported from SoulX-FlashHead's anti-drift step. Chained chunks
+  inherit each other's colour error through the carried latents and amplify it. With
+  `first_chunk`, chunk 1's decoded frames become the colour anchor. After every chunk,
+  the frames the next chunk will carry are decoded, each frame's Lab mean and spread
+  are moved to the anchor's, and the result is re-encoded and written back as the
+  carry. Both carry modes read it from there. Nothing else in the master is changed.
+  Appended last; **off by default**, so saved graphs render as before.
+
+  Measured 2026-10-23 on a 20 s static talking head (FastH3 Omni NVFP4, 512x512,
+  4 steps, 28 chunks of ~17 new frames, 5-frame carry, same seed both runs):
+  saturation 56 → 97 at 10 s and 102 at 18 s without it, 55–60 throughout with it;
+  face red-minus-blue 54 → 100 → 106 without, 48–56 with. On its own **identity still
+  drifts** by 15–20 s; with `overlap_strength_video` at 0.6 as well, face and detail
+  held to 20 s too (docs/looping-sampler.md §10). Costs ~0.9 s per chunk there (0.4 s
+  decode + 0.5 s encode, mostly ComfyUI's per-call VAE staging), 1.4 → 2.4 s per
+  chunk. Seams show a small colour step (largest frame-to-frame jump 13.6 against
+  a median 0.9), since the carry is corrected and the frames before it are not.
+  Needs `vae`; refuses without it. A carry that is not a whole clip (5k+2 latents) is
+  left as sampled and reported. The report gives each chunk's drift from the anchor
+  before correction, as CIE76 delta E. New module `mmh3tools/color_carry.py`; tests
+  in `tests/test_color_carry.py`.
+
+  **`first_chunk_latent`** is the same transfer on the latents: each carried latent
+  frame's per-channel mean and spread moved to chunk 0's latents, 1-frame and 4-frame
+  tokens anchored separately. No `vae`, no decode or encode. On the same chain at
+  carry 0.6 it held colour as well as the pixel route at 1.41 s per chunk (no
+  measurable cost, against 2.4 s), with more detail kept but a larger seam step
+  (mean 7.6 against 5.4).
+
 ## [Unreleased] — 0.105.0
 
 ### Added

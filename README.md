@@ -1698,7 +1698,9 @@ avatar). It packages the Looping Sampler's per-chunk work with the recipe that h
 and the speech pinned. `load_model` / `load_vae` / `build_conditioning` set it up;
 `LiveH3.render(audio)` takes one chunk of 48 kHz mono audio and returns that chunk's new
 frames. On an RTX 5090 at 512x512, 2 steps, a 56-frame window renders ~2.1 s of video in
-~1.7 s. The pack does not import it, so it changes nothing for the nodes. Reference:
+~1.7 s. Since 0.108.0 the prompt can change per window (`render(audio, cond=...)`, with
+`build_conditionings` encoding several in one pass), e.g. a listening prompt while nobody
+speaks. The pack does not import it, so it changes nothing for the nodes. Reference:
 [`docs/live.md`](docs/live.md).
 
 ## Grid reference

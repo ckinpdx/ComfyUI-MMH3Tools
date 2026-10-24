@@ -57,10 +57,12 @@ class FakeNoise:
 
 SEEN = []          # (video latent, video mask, audio latent, audio mask, noise seed) per window
 OUT = []           # what each fake sampling returned (video)
+POSITIVE = []      # the conditioning each window's guider was given
 def fake_run_sampling(noise, guider, sampler, sigmas, latent, start, end):
     v, a = unpack_av(latent, "window")
     vm, am = latent["noise_mask"].unbind()
     SEEN.append((v.clone(), vm.clone(), a.clone(), am.clone(), noise.seed))
+    POSITIVE.append(guider.original_conds["positive"])
     out = torch.randn(v.shape, generator=torch.Generator().manual_seed(len(SEEN))) * (1 + len(SEEN))
     OUT.append(out)
     return {"samples": __import__("comfy.nested_tensor", fromlist=["NestedTensor"]).NestedTensor([out, a])}
@@ -90,7 +92,7 @@ LIVE._encode_audio = fake_encode
 
 
 def session(**kw):
-    SEEN.clear(); OUT.clear(); AUDIO_CALLS.clear()
+    SEEN.clear(); OUT.clear(); AUDIO_CALLS.clear(); POSITIVE.clear()
     vae = FakeVae()
     cfg = LIVE.LiveConfig(size=512, window_frames=56, **kw)
     return LIVE.LiveH3("MODEL", vae, "AVAE", [[torch.zeros(1, 8), {}]], {}, cfg), vae, cfg
@@ -139,6 +141,20 @@ check("encodes context + window of history, stereo, at the input rate",
 check("newest sample last", last, 0.5)
 live.render(np.zeros(100, np.float32))           # short input is padded, not refused
 check("short audio padded to a full chunk", AUDIO_CALLS[1][0][-1], AUDIO_CALLS[0][0][-1])
+
+print("\n6. a per-window conditioning (0.108.0)")
+live, vae, cfg = session()
+talk, idle = [[torch.zeros(1, 8), {"tag": "talk"}]], [[torch.zeros(1, 8), {"tag": "idle"}]]
+live.render(chunk, cond=idle); live.render(chunk); live.render(chunk, cond=talk)
+check("each window's guider gets the conditioning it was given, else the session's",
+      [p[0][1].get("tag") for p in POSITIVE], ["idle", None, "talk"])
+check("the carry still runs across a switch", round(float(SEEN[2][1][:, :, :2].unique()), 4), 0.4)
+for bad, prompts in (("a '|' in a prompt", ["one | two"]), ("an empty prompt", ["fine", "  "])):
+    try:
+        LIVE.build_conditionings(None, None, None, None, prompts, cfg)
+        check("build_conditionings refuses " + bad, "no error", "ValueError")
+    except ValueError:
+        check("build_conditionings refuses " + bad, True, True)
 
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

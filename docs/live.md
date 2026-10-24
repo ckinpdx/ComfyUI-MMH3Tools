@@ -37,6 +37,24 @@ frames, timing = live.render(audio)        # audio: live.samples_per_chunk float
   `audio_s` / `sample_s` / `decode_s` / `total_s` / `drift_sd` (how far the carry had drifted
   from the colour anchor before correction, in anchor standard deviations).
 
+### A different prompt per window (0.108.0)
+
+`render(audio, cond=...)` uses `cond` for that window only; without it, the session's. The
+use it was made for: a **listening** prompt while nobody speaks. A talking prompt over a
+silent soundtrack tells the model she is speaking while the audio says she is not, and
+the idle face mouths and pulls odd expressions. `build_conditionings()` encodes several
+prompts for the same face in one text-encoder pass:
+
+```python
+(talk, idle), template = build_conditionings(clip, vae, audio_vae, image, [talk_prompt, idle_prompt], cfg)
+live = LiveH3(model, vae, audio_vae, talk, template, cfg)
+frames, _ = live.render(audio, cond=idle if not np.abs(audio).any() else None)
+```
+
+The carry runs across a switch as across any window, so motion stays continuous; the
+expression changes over the window. Prompts must not contain `|` (the multi-prompt
+separator) and must not be empty.
+
 ## What one window is
 
 | | 39-frame window | 56-frame window |

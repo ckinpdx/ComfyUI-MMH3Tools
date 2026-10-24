@@ -9,6 +9,18 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.108.0
+
+### Added
+
+- **`mmh3tools.live`: a different prompt per window.** `LiveH3.render(audio, cond=...)` uses
+  `cond` for that window only (default: the session's), and `build_conditionings()` encodes
+  several prompts for the same face in one text-encoder pass. Made for a listening prompt
+  while nobody speaks: a talking prompt over a silent soundtrack made the idle face mouth
+  and pull odd expressions in the live avatar. The carry runs across a switch as across any
+  window. Backward compatible: `render(audio)` and `build_conditioning()` are unchanged.
+  Tests in `tests/test_live.py` §6; usage in [`docs/live.md`](docs/live.md).
+
 ## [Unreleased] — 0.107.0
 
 ### Added

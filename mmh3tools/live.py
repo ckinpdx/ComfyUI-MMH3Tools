@@ -103,13 +103,24 @@ def build_conditioning(clip, vae, audio_vae, image, prompt, config):
     """The face + prompt conditioning and the window's latent template, through MMH3ReferenceMultiPrompt
     (ref_image_size "match"). `image`: [1, H, W, 3] float 0..1. Evicts the text encoder afterwards. Encode once and
     cache the result (torch.save of the pair works); the text encoder is the largest model involved."""
+    conds, template = build_conditionings(clip, vae, audio_vae, image, [prompt], config)
+    return conds[0], template
+
+
+def build_conditionings(clip, vae, audio_vae, image, prompts, config):
+    """Several prompts for the same face in one text-encoder pass (e.g. a talking and a listening prompt, to pick
+    per window with render(cond=...)). Returns (list of conditionings in prompt order, template)."""
     from .nodes_multiprompt import MMH3ReferenceMultiPrompt
+    prompts = [p.strip() for p in prompts]
+    if any("|" in p for p in prompts) or not all(prompts):
+        raise ValueError("build_conditionings: prompts must be non-empty and contain no '|' (the multi-prompt "
+                         "separator)")
     cond_set, latent, _count, _windows = MMH3ReferenceMultiPrompt.execute(
-        clip, vae, audio_vae, config.size, config.size, config.window_frames, "match", prompts=prompt,
+        clip, vae, audio_vae, config.size, config.size, config.window_frames, "match", prompts=" | ".join(prompts),
         ref_images=image, unload_text_encoder=True).result
-    cond = _strip_guide_keys(cond_set["conds"][0], "live prompt")
+    conds = [_strip_guide_keys(c, "live prompt %d" % i) for i, c in enumerate(cond_set["conds"])]
     template = {k: v for k, v in latent.items() if k not in ("samples", "noise_mask")}
-    return cond, template
+    return conds, template
 
 
 def _make_sampling(model, cond, config):
@@ -150,8 +161,10 @@ class LiveH3:
         z = _encode_audio(self.audio_vae, wave, self.config.audio_rate)
         return z[..., -self._audio_t:].float().cpu()
 
-    def render(self, audio):
-        """audio: samples_per_chunk float32 mono at config.audio_rate (padded or cut to fit). Returns
+    def render(self, audio, cond=None):
+        """audio: samples_per_chunk float32 mono at config.audio_rate (padded or cut to fit). cond: conditioning for
+        this window only, e.g. a listening prompt while nobody speaks (same face and size; from build_conditionings);
+        default the session's. The carry keeps motion continuous across a switch. Returns
         (uint8 RGB frames [frames_per_chunk, size, size, 3], timings in seconds)."""
         c = self.config
         t0 = time.perf_counter()
@@ -169,7 +182,8 @@ class LiveH3:
             vm[:, :, :CARRY_LATENTS] = 1.0 - float(c.carry_strength)
         am = torch.zeros([1, 1, a.shape[2], a.shape[3]])                                # the speech is pinned
         latent = pack_av(self.template, v, a, noise_mask=NestedTensor([vm, am]))
-        done = _run_sampling(_chunk_noise(self.noise, self.index), _chunk_guider(self.guider, self.cond),
+        done = _run_sampling(_chunk_noise(self.noise, self.index),
+                             _chunk_guider(self.guider, self.cond if cond is None else cond),
                              self.sampler, self.sigmas, latent, 0, 1000)
         dv, _da = unpack_av(done, "live window")
         dv = dv.float().cpu()

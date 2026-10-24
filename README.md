@@ -1757,3 +1757,11 @@ per chunk, a section spliced into the wrong format. None of that raises; it rend
 and looks slightly bad. The tests are the record of which of those have been pinned
 down, and several encode a bug that actually shipped. Read them as the honest version
 of the claims above.
+
+## Licence
+
+MIT (see LICENSE). That covers this pack's code only. MiniMax H3's weights, and
+everything generated with them, are under the
+[MiniMax H3 Community License Agreement](https://huggingface.co/MiniMaxAI/MiniMax-H3/blob/main/LICENSE),
+whatever this pack's licence says; read it, including the territories it covers and
+its Acceptable Use Policy.

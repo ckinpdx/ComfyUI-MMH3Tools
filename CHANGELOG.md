@@ -25,6 +25,9 @@ the entry, and migrate any local workflow in the same commit.
   pack does not import it, so nothing changes for the nodes or saved workflows. Tests in
   `tests/test_live.py` (stubbed sampler and VAE).
 
+- **`LICENSE` (MIT).** `pyproject.toml` has always declared MIT; the licence file itself was
+  missing. The README now says what it covers: the pack's code, not H3's weights or outputs.
+
 ## [Unreleased] — 0.106.0
 
 ### Added

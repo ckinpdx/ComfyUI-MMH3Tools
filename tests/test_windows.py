@@ -1,4 +1,4 @@
-import os, sys
+import dataclasses, os, sys
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..", "..", "..")))
 sys.path.insert(0, os.path.abspath(os.path.join(_HERE, "..")))
@@ -18,6 +18,14 @@ def check(label, got, want):
         fails.append(label)
 
 
+def dims_kw(dims):
+    """core v0.44 (#17425) added a per-stream temporal dim to WindowingState; older
+    cores have no such field, so pass it only where it exists."""
+    if "modality_dims" in {f.name for f in dataclasses.fields(MMH3WindowingState)}:
+        return {"modality_dims": list(dims)}
+    return {}
+
+
 def make_state(total_v):
     frames = latents_to_frames(total_v)
     total_a = frames_to_audio_t(frames)
@@ -26,9 +34,9 @@ def make_state(total_v):
     return MMH3WindowingState(
         latents=[video, audio], guide_latents=[None, None],
         guide_entries=[None, None], keyframe_idxs=[None, None],
-        latent_shapes=[video.shape, audio.shape],
-        modality_dims=[VIDEO_T_DIM, AUDIO_T_DIM], dim=VIDEO_T_DIM,
-        is_multimodal=True, temporal_downscale_ratio=4), total_a
+        latent_shapes=[video.shape, audio.shape], dim=VIDEO_T_DIM,
+        is_multimodal=True, temporal_downscale_ratio=4,
+        **dims_kw([VIDEO_T_DIM, AUDIO_T_DIM])), total_a
 
 
 print("\n1. boundary mapping is exact on the 5j+2 grid")
@@ -105,7 +113,8 @@ print("\n8. non-multimodal latents pass through untouched")
 st_plain = MMH3WindowingState(
     latents=[torch.zeros([1, 24, 57, 6, 10])], guide_latents=[None],
     guide_entries=[None], keyframe_idxs=[None], latent_shapes=None,
-    modality_dims=[VIDEO_T_DIM], dim=VIDEO_T_DIM, is_multimodal=False, temporal_downscale_ratio=4)
+    dim=VIDEO_T_DIM, is_multimodal=False, temporal_downscale_ratio=4,
+    **dims_kw([VIDEO_T_DIM]))
 w = IndexListContextWindow(list(range(0, 17)), dim=VIDEO_T_DIM, total_frames=57)
 check("returned unchanged", st_plain.prepare_window(w, None) is w, True)
 

@@ -132,6 +132,12 @@ reference region and a carried tail's audio went early with it. The looping samp
 asks `is_applied()` and refuses when a chunk carries both a reference and a keyframe on
 a build that needs the fix and lacks it.
 
+A second wrap, `mmh3tools/patch_ref_shift.py` (dev branch), is used only by the looping
+sampler's `carry="ref"` with `ref_carry_audio="shifted"`. It moves the rows of an audio
+reference that carries the pack's own key onto the target's timeline and touches
+nothing else: a layout without that key is exactly stock. It tests itself at import and
+stands down if it cannot place a block where asked.
+
 ## Why this exists
 
 Three facts about H3 shape everything here:
@@ -1101,6 +1107,30 @@ a choice here — now lives in
   method in
   [`docs/looping-sampler.md`](docs/looping-sampler.md) §3 and §10.
 
+  **`carry_noise`** (0.109.0) hands each chunk a slightly noisy copy of its carry: the
+  carried video latents become `(1 - n) * carry + n * noise` once before the chunk and
+  are held as usual, and the clean carry is put back afterwards, so the noise never
+  reaches the output. Core holds a carry 99.9% clean at every step, which is why the
+  model copies it so faithfully, drift included; LTX noises its conditioning frames on
+  purpose. Off by default. On its own it did not stop chain over-bake; what did was an
+  anti-burn LoRA at 1.0 with `overlap_strength_video` 0.6, colour match 0.4 and
+  `carry_noise` 0.1 (field guide §9, §10).
+
+  **`carry_crossfade`** (0.109.0, `carry="keyframe"` only, on by default) fades the
+  overlap from the previous chunk's frames into the new chunk's, since a keyframe carry
+  is conditioning and each chunk renders its own overlap. 0.109.0 also fixes keyframe
+  carry with `use_input_audio`: chunks were handed the whole clip's noise mask.
+
+  **`carry="ref"`** (dev branch, experimental; one run on real weights: it over-bakes
+  like the other routes without the anti-burn LoRA, and some joins show a seam) hands the
+  previous chunk's tail over as a reference, the way H3 is trained to receive existing
+  footage, and pins the chunk's first frame as a one-frame guide so the join has a
+  known place and nothing is trimmed. `ref_carry_frames` sets the length of the tail.
+  `ref_carry_audio` sets how the audio reaches the next chunk: `shifted` (its own
+  audio reference placed on the chunk's timeline, `ref_carry_audio_seconds` long),
+  `block` (inside the video reference) or `off`. Wants a reference model and a short
+  overlap (5 frames). Field guide §3.
+
 - **MiniMax H3 Keyframe Planner** — end-anchored keyframe indices for a chained run,
   ported from LTXAVTools' planner. Frame 0 opens, each chunk travels to a keyframe at
   the last frame **it renders**, the final one ends on `-1`. Start-anchoring instead
@@ -1110,11 +1140,21 @@ a choice here — now lives in
 
   Same three numbers as the sampler, same `_plan`, so the two cannot disagree about
   where a chunk ends.
-- **MiniMax H3 Context Windows** — windowed sampling over one long latent, per
+- **MMH3 Context Windows** — windowed sampling over one long latent, per
   modality: video on dim 2, audio on dim 3, each with its own window. Snaps length
   and overlap to the grid, since an overlap that is a multiple of 5 rather than
   `5m+2` walks the window phase `0,2,4,1,3` — a five-window beat, which is the
   pulsing. See [`docs/context-windows.md`](docs/context-windows.md).
+
+  Shown as "MiniMax H3 Context Windows" before 0.109.0; renamed because core ComfyUI
+  v0.44 added its own node under that name (`MiniMaxH3ContextWindows`, #17425). The
+  node id is unchanged, so saved graphs are unaffected. The two do the same job.
+  Core's takes frames (17n+5) and defaults FreeNoise on. Core v0.44 also windows H3
+  keyframe guides (first/last frame, Add Guide) per window, in the model's own resize
+  hook; this node goes through the same hook, so it should get that too on v0.44+
+  (not yet tested with guides; on older cores it does not). This one takes latents
+  tied to **MMH3 Window Plan**, offers the uniform schedule, `accumulator_device =
+  cpu` and a `label` output.
 
   Windows are **not** a way to grow a clip: every window is a slice of one
   preallocated latent, and all of them sit at the same noise level at every step.
@@ -1332,7 +1372,10 @@ a choice here — now lives in
   ffmetadata file rather than a command-line argument because a workflow is 45–95 KB
   and Windows caps a command line near 32,767 characters. `faststart` is deliberately
   not applied — relocating the moov atom rewrites the whole file and would undo the
-  constant-cost decode this node exists for.
+  constant-cost decode this node exists for. `single_chunk` (0.109.0) decodes everything
+  in one VAE call instead, for when RAM is not the problem; `preview_only` (0.109.0)
+  writes to ComfyUI's temp folder, so the clip plays in the node and is gone after a
+  restart.
 - **Whisper to Text (LLM Ready)** — flattens ComfyUI-Whisper's per-word
   `whisper_alignment` into text a prompt writer can read, with timestamp markers so it
   knows where in the song each line falls. Feed it to the scene-plan nodes as lyrics.
@@ -1665,6 +1708,11 @@ needs per-row timestep handling to mean anything -- **#15375**. Positioned ancho
 the clip's own timeline need interior indices and the accumulate fix -- **#15439**,
 which the **Looping Sampler** uses as `carry="keyframe"`. Both are upstream PRs
 applied to core, not monkeypatches; see [`docs/core-changes.md`](docs/core-changes.md).
+
+The masked carry (the previous chunk's real latents held at the head of the next
+chunk under a noise mask) has been public in this pack since its first commit:
+`MMH3SeedOverlap` on 2026-08-05 (`07645f4`), and the Looping Sampler built on it on
+2026-08-09 (`6b3749b`). It rests on drozbay's per-row masking, #15375.
 
 **References are positioned.** The layout lays them out from a cursor starting at
 `text_len`, a `video`/`video_audio` block advances that cursor by its own temporal

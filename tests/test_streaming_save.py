@@ -27,7 +27,9 @@ def check(label, got, want):
 # slicing, context and trim errors -- the class of mistake actually available here --
 # but would not catch wrong blend WEIGHTS. Those come from core and are unchanged.
 def make_vae(H=1, W=1):
-    o = types.SimpleNamespace(clip_length=17, token_drop=3, vae_ratio_t=4, tiling=False)
+    # noncausal: core v0.44 (#17411) added the Sol-H3-VAE decoder; this stub is the causal one
+    o = types.SimpleNamespace(clip_length=17, token_drop=3, vae_ratio_t=4, tiling=False,
+                              noncausal=False)
     o.frame_pre_padding = (-o.clip_length) % o.vae_ratio_t
     o.tokens_chunk_size = math.ceil(o.clip_length / o.vae_ratio_t)
     o.token_overlap = (-o.token_drop) % o.tokens_chunk_size
@@ -41,9 +43,6 @@ def make_vae(H=1, W=1):
     # copy that can silently drift from it. vae_ratio is 1 because the fake decode
     # below returns H/W unscaled.
     o.vae_ratio = 1
-    # the stock H3 VAE; Sol-H3-VAE's noncausal decoder (#17411) has a different
-    # frame grid and is not what the 17j+5 checks below describe
-    o.noncausal = False
     o.decoder = types.SimpleNamespace(out_channels=3)
     o._decode_temporal_chunks = K._decode_temporal_chunks.__get__(o)
     o.decode_output_shape = K.decode_output_shape.__get__(o)
@@ -154,6 +153,112 @@ naive = streamed_no_context(57, 4)
 good = streamed(57, 4)
 check("no-context length still matches", int(naive.shape[2]), int(good.shape[2]))
 check("but it is NOT exact", bool(torch.equal(naive, good)), False)
+
+print("\n6. execute: single_chunk is ONE decode, byte-identical to the chunked stream")
+import subprocess, tempfile
+import folder_paths
+from mmh3tools import nodes_save as N
+
+OUT_DIR, TMP_DIR = tempfile.mkdtemp(), tempfile.mkdtemp()
+folder_paths.set_output_directory(OUT_DIR)
+folder_paths.set_temp_directory(TMP_DIR)
+N.MMH3StreamingSave._resolve_ffmpeg = classmethod(lambda cls, path, want: ("ffmpeg", "libx264"))
+
+
+class FakeStdin:
+    def __init__(self):
+        self.data = bytearray()
+    def write(self, b):
+        self.data += b
+    def close(self):
+        pass
+
+
+STREAMS = []
+class FakePopen:
+    """ffmpeg stand-in: keeps what was piped in and writes the output file on wait."""
+    def __init__(self, args, stdin=None, stderr=None):
+        self.args, self.stdin = args, FakeStdin()
+        STREAMS.append(self)
+    def wait(self):
+        with open(self.args[-1], "wb") as f:
+            f.write(b"fake mp4")
+        return 0
+    def kill(self):
+        pass
+
+_real_popen = subprocess.Popen
+subprocess.Popen = FakePopen
+
+
+class StubVae:
+    """VAE.decode over the real decode_temporal, channels-last like comfy's VAE.decode;
+    pixel = latent index / 100 so values survive the [0,1] clamp and the uint8 cast."""
+    def __init__(self):
+        self.first_stage_model = make_vae(H=2, W=2)
+        self.calls = []
+    def decode(self, z):
+        self.calls.append((int(z[0, 0, 0, 0, 0]), int(z.shape[2])))
+        px = self.first_stage_model.decode_temporal(z) / 100.0
+        return px.permute(0, 2, 3, 4, 1)                       # [B, F, H, W, 3]
+
+
+def save(T, **kw):
+    STREAMS.clear()
+    vae = StubVae()
+    lat = {"samples": latents(T).expand(1, 24, T, 2, 2).clone()}
+    out = N.MMH3StreamingSave.execute(lat, vae, kw.pop("groups", 1), 24.0, "t/clip", 19,
+                                      save_metadata=False, **kw)
+    return out, vae, bytes(STREAMS[0].stdin.data)
+
+T6 = 5 * 6 + 2
+o_chunked, vae_c, b_chunked = save(T6, groups=1)
+o_single, vae_s, b_single = save(T6, groups=1, single_chunk=True)
+check("chunked: one call per group", len(vae_c.calls), 6)
+check("single_chunk: one decode call", len(vae_s.calls), 1)
+check("...over every latent", vae_s.calls[0], (0, T6))
+check("same frame count", len(b_single), len(b_chunked))
+check("byte-identical to the chunked stream", b_single == b_chunked, True)
+
+print("\n7. preview_only writes to temp, is served as temp, and keeps nothing in output")
+o_prev, _v, _b = save(T6, preview_only=True)
+path = o_prev.result[0]
+img = o_prev.ui["images"][0]
+check("file is under the temp folder", os.path.dirname(path).startswith(TMP_DIR), True)
+check("file exists", os.path.isfile(path), True)
+check("ui type is temp", img["type"], "temp")
+check("random temp suffix in the name", "_temp_" in os.path.basename(path), True)
+check("ui names the file", img["filename"], os.path.basename(path))
+check("nothing written to output by the preview",
+      {f for _r, _d, fs in os.walk(OUT_DIR) for f in fs if "_temp_" in f}, set())
+
+print("\n8. defaults unchanged: output folder, type output")
+o_def, _v, _b = save(T6)
+check("file is under output", os.path.dirname(o_def.result[0]).startswith(OUT_DIR), True)
+check("ui type is output", o_def.ui["images"][0]["type"], "output")
+
+print("\n9. a non-causal VAE (Sol-H3-VAE) is decoded whole, never sliced")
+class SolVae(StubVae):
+    """Reports a non-causal decoder to the node; still decodes with the causal stub,
+    since only the slicing decision is under test here."""
+    def __init__(self):
+        super().__init__()
+        self.first_stage_model.noncausal = True
+    def decode(self, z):
+        self.first_stage_model.noncausal = False
+        try:
+            return super().decode(z)
+        finally:
+            self.first_stage_model.noncausal = True
+
+STREAMS.clear()
+sol = SolVae()
+N.MMH3StreamingSave.execute({"samples": latents(T6).expand(1, 24, T6, 2, 2).clone()}, sol, 1,
+                            24.0, "t/sol", 19, save_metadata=False)
+check("one decode call despite groups_per_chunk 1", len(sol.calls), 1)
+check("...over every latent", sol.calls[0], (0, T6))
+
+subprocess.Popen = _real_popen
 
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

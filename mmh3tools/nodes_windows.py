@@ -1,12 +1,23 @@
 """Context windows for MiniMax H3, without patching core.
 
+CORE HAS ITS OWN NOW. ComfyUI v0.44 (#17425, Oct 2026) added `MiniMaxH3ContextWindows`
+and fixed both gaps below in core: MiniMaxH3 implements
+`map_context_window_to_modalities` and `context_window_modality_dims`, and the stock
+handler uses each window's own dim. Core also windows H3 keyframe guides (cropped and
+re-anchored per window) in MiniMaxH3.resize_cond_for_context_window; this handler
+inherits that, since it keeps core's get_resized_cond and sets `_model` (untested
+here with guides). This node stays for what core's lacks: latent units tied to MMH3 Window Plan, the uniform schedule,
+`accumulator_device`, and the `label` output. Its overrides still work on the new
+core; on it they are redundant rather than required. What follows is the situation
+this was written against (core <= v0.42).
+
 ComfyUI's context windowing already has a complete multimodal design and H3 opts
 into it for free -- `is_multimodal = len(latent_shapes) > 1` is true for any packed
-AV latent. Two things stop it working out of the box:
+AV latent. Two things stopped it working out of the box:
 
-  1. `map_context_window_to_modalities` has ZERO implementations tree-wide. The
-     multimodal path raises NotImplementedError for every model.
-  2. `WindowingState` uses ONE `dim` for every modality. H3's video is dim 2 and
+  1. `map_context_window_to_modalities` had ZERO implementations tree-wide. The
+     multimodal path raised NotImplementedError for every model.
+  2. `WindowingState` used ONE `dim` for every modality. H3's video is dim 2 and
      audio is dim 3, so the stock path would window audio [B,32,2,T40] on its
      STEREO axis -- size 2, not T40. It would not crash; it would produce a ratio
      of 2/T and nonsense indices.
@@ -163,9 +174,12 @@ def _resize_denoise_mask(cond_key, cond_value, window, x_in, device, cond_item):
     -- the mod-row weight vector sized for the whole clip, applied to one window's rows.
 
     LTXAV solves this by overriding `resize_cond_for_context_window` on the model class.
-    MiniMaxH3 has no such override, and adding one would mean patching core. This does it
-    from the handler's own RESIZE_COND_ITEM callback instead, which needs no core change
-    and dies loudly if the hook is ever removed.
+    MiniMaxH3 had no such override until core v0.44 (#17425), and adding one would have
+    meant patching core. This does it from the handler's own RESIZE_COND_ITEM callback
+    instead, which needs no core change and dies loudly if the hook is ever removed. On
+    v0.44+ core's override would cut `audio_denoise_mask` too, but RESIZE_COND_ITEM
+    callbacks run first and a key they handle skips the model's override, so each mask
+    is still cut exactly once, here.
 
     Each modality slices on ITS OWN axis: video masks are [B,1,T,h,w] on dim 2, audio
     masks [B,1,2,T40] on dim 3. Using one dim for both would slice audio on its stereo
@@ -414,7 +428,7 @@ class MMH3ContextWindows(io.ComfyNode):
     def define_schema(cls):
         return io.Schema(
             node_id="MMH3ContextWindows",
-            display_name="MiniMax H3 Context Windows",
+            display_name="MMH3 Context Windows",
             category="MMH3Tools/sampling",
             description=(
                 "Sample a long AV latent in overlapping windows. FOR LOW-DENOISE PASSES "

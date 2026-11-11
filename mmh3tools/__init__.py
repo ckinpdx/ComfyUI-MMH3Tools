@@ -1,5 +1,6 @@
 from . import patch_guide_origin as _patch_guide_origin
 from . import patch_ref_labels as _patch_ref_labels
+from . import patch_ref_shift as _patch_ref_shift
 from .nodes_imagelist import MMH3ImageList
 from .nodes_loop import MMH3SeedOverlap, MMH3ConcatAV, MMH3FindDivergence, MMH3JoinAV, MMH3PackAV
 from .nodes_align import MMH3ForcedAlign
@@ -72,6 +73,7 @@ from .nodes_util import (
 
 _patch_guide_origin.apply()
 _patch_ref_labels.apply()
+_patch_ref_shift.apply()
 
 NODES = [
     # MMH3Tools

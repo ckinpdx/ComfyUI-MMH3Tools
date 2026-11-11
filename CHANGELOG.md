@@ -9,6 +9,83 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.109.0
+
+### Added
+
+- **Looping Sampler: `carry="ref"`** (branch `dev/ref-carry`, experimental). Run once on
+  real weights without the anti-burn LoRA: the chain still over-bakes, so it is a third
+  way to carry and not a fix for that, and some joins show a seam. The previous chunk's
+  tail rides as a reference block, which is how H3
+  is trained to receive existing footage, and the chunk's first latent is pinned as a
+  one-frame guide at frame 0. That frame is a slot both chunks own, so the join has a
+  known place and the chunk is written back in place with no trim. The chunk renders
+  its own overlap from there; `carry_crossfade` now applies to this route too. Three
+  inputs, appended after `carry_crossfade`: `ref_carry_frames` (22), `ref_carry_audio`
+  (`shifted` / `block` / `off`) and `ref_carry_audio_seconds` (2.0). With `shifted`
+  the tail's audio is its own reference placed on the chunk's timeline, so each carried
+  audio latent sits at the instant it belongs to; the overlap's audio in the output
+  stays the previous chunk's. A clamped last window falls back to the mask carry.
+  `carry_color_match` corrects the reference and leaves the master as sampled. Refuses
+  `carry_noise`, `guide_video` and an overlap of 0. Needs #15439 and a reference model.
+  Tests in `tests/test_ref_carry.py`.
+
+- **`mmh3tools/patch_ref_shift.py`.** A wrap on `PackedLayout` that translates an
+  `audio` reference block carrying the private key `mmh3_end_t` so it ends that many
+  audio latents past the target origin. Nothing else moves, a layout without the key
+  is stock, and it self-tests at import and rolls back on a mismatch. Used only by
+  `carry="ref"` with `ref_carry_audio="shifted"`.
+
+- **Looping Sampler: `carry_crossfade`** (on by default, `carry="keyframe"` only). The
+  keyframe carry is a guide, so each chunk renders its own overlap; the output's overlap
+  now fades from the previous chunk's frames into the new chunk's (smoothstep), as
+  mo-akkakk's H3 windows pack (MIT) does. Off: the new overlap replaces the old, as before.
+  Video only. Appended after `carry_noise`. Tests in
+  `tests/test_keyframe_carry_crossfade.py`.
+
+- **Looping Sampler: `carry_noise`.** Hands each chunk a slightly noisy copy of its carry
+  instead of an exact one: once, before the chunk, the carried video latents become
+  `(1 - n) * carry + n * noise` and are held as usual; after the chunk the clean carry is put
+  back, so the output never contains the noise (exact at any `overlap_strength_video`: core's
+  masked blend is undone term for term). Core holds a carry 99.9% clean at every step, and the
+  drift measurements keep pointing at the model copying it; LTX noises its conditioning frames
+  for this reason. Noise is seeded per chunk from the noise seed. Video only, `carry="mask"`
+  only, off by default, appended after `carry_color_strength`. Tests in
+  `tests/test_carry_noise.py` (a stub sampler that reproduces core's blend). On real
+  weights it does not stop chain over-bake by itself; 0.1 is part of the recipe that did,
+  with an anti-burn LoRA at 1.0 (field guide §9, §10).
+
+- **Streaming Save decodes a non-causal VAE whole.** Sol-H3-VAE (core v0.44, #17411)
+  decodes the clip in one non-causal pass whose attention crosses block boundaries, so
+  the context-group slicing cannot make a slice exact. With such a VAE the node now
+  decodes in a single chunk and logs a warning, instead of mis-slicing at every batch
+  boundary with nothing raised. Test in `tests/test_streaming_save.py` §9.
+
+- **Context windows node shown as "MMH3 Context Windows"** (was "MiniMax H3 Context
+  Windows"), because core v0.44 (#17425) added its own node under the old name. The node
+  id `MMH3ContextWindows` is unchanged, so saved graphs are unaffected. Docstring and
+  `docs/context-windows.md` updated: their "no implementations / no override" claims
+  described core <= v0.42.
+
+- **Tests follow core v0.44.** `test_windows.py` passes `WindowingState`'s new
+  `modality_dims` where the field exists; `test_streaming_save.py`'s stub VAE carries the
+  new `noncausal` flag. Both still run on older cores.
+
+- **Streaming Save: `single_chunk` and `preview_only`.** `single_chunk` decodes the whole
+  latent in one VAE call, as a plain full decode would; `groups_per_chunk` is ignored and
+  the full pixel tensor exists at once (about 4.5 GB at 1344x768 for 362 frames). Its
+  output is byte-identical to the chunked stream in the tests. `preview_only` writes the mp4
+  to ComfyUI's temp folder with a random suffix, as core's Preview Image does, so it plays
+  in the node but is not kept; no metadata is embedded, and `file_path` returns the temp
+  file. Both off by default, appended after `save_metadata`. Tests in
+  `tests/test_streaming_save.py` §6-8 (stubbed VAE and ffmpeg).
+
+### Fixed
+
+- **Looping Sampler, `carry="keyframe"` with a pinned track:** every chunk was handed the
+  whole clip's noise mask (the chunk is built from the master latent, and only the `mask`
+  and no-carry branches sliced it). It now gets its own slice, so a `use_input_audio` pin
+  holds per chunk. Never seen in a render: keyframe carry had not been run.
 ## [Unreleased] — 0.108.1
 
 ### Fixed

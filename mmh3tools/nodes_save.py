@@ -59,6 +59,7 @@ import json
 import logging
 import math
 import os
+import random
 import re
 import shutil
 import subprocess
@@ -272,6 +273,24 @@ class MMH3StreamingSave(io.ComfyNode):
                             "carries every prompt and path in the graph. ComfyUI's own "
                             "--disable-metadata also wins over this.",
                 ),
+                io.Boolean.Input(
+                    "single_chunk", default=False, optional=True,
+                    tooltip="Decode the whole latent in ONE vae call, as a plain full "
+                            "decode would, instead of groups_per_chunk at a time. "
+                            "groups_per_chunk is then ignored.\n\n"
+                            "The full pixel tensor exists at once, which is what this "
+                            "node otherwise avoids: about 4.5 GB at 1344x768 for 362 "
+                            "frames, 21 GB at 2K for 750.",
+                ),
+                io.Boolean.Input(
+                    "preview_only", default=False, optional=True,
+                    tooltip="Write the mp4 to ComfyUI's TEMP folder instead of output, "
+                            "so it plays in the node but is not kept: ComfyUI clears "
+                            "temp on restart. No workflow metadata is embedded. "
+                            "file_path still returns the temp file.\n\n"
+                            "The encode is the same either way; the browser needs an "
+                            "mp4 to play.",
+                ),
             ],
             hidden=[io.Hidden.prompt, io.Hidden.extra_pnginfo],
             outputs=[io.String.Output(display_name="file_path")],
@@ -281,7 +300,8 @@ class MMH3StreamingSave(io.ComfyNode):
     @classmethod
     def execute(cls, latent, vae, groups_per_chunk, fps, filename_prefix, crf,
                 audio=None, video_encoder="auto", ffmpeg_path="",
-                save_metadata=True) -> io.NodeOutput:
+                save_metadata=True, single_chunk=False,
+                preview_only=False) -> io.NodeOutput:
         video, _ = unpack_av(latent, "latent", allow_video_only=True)
         video = video[:1]
         T = int(video.shape[2])
@@ -300,12 +320,37 @@ class MMH3StreamingSave(io.ComfyNode):
         # 17j+5: every group is 17 frames, plus the final chunk's carried part
         expected = frames_per_group * n_groups + TAIL_FRAMES
 
+        # The slicing above is for the CAUSAL decoder. Sol-H3-VAE (core #17411) decodes
+        # the whole clip in one non-causal pass whose attention windows cross block
+        # boundaries, so a slice decoded on its own is wrong at its edges and the
+        # context-group scheme cannot repair it. Decode it whole rather than mis-slice.
+        noncausal = getattr(getattr(vae, "first_stage_model", None), "noncausal", False)
+        if noncausal and not single_chunk:
+            logging.warning("[MMH3StreamingSave] this VAE has a non-causal decoder "
+                            "(Sol-H3-VAE), which cannot be decoded in slices; decoding "
+                            "in a single chunk instead")
+            single_chunk = True
+
+        # One batch covering every group is a plain full decode: no context group,
+        # no lookahead cut, and the tail kept because the batch is the last one.
+        step = n_groups if single_chunk else int(groups_per_chunk)
+
         ffmpeg, encoder = cls._resolve_ffmpeg(ffmpeg_path, video_encoder)
         logging.info("[MMH3StreamingSave] ffmpeg %s | encoder %s%s | %d groups, %d frames "
-                     "expected", ffmpeg, encoder,
-                     "" if video_encoder == "auto" else " (forced)", n_groups, expected)
+                     "expected%s%s", ffmpeg, encoder,
+                     "" if video_encoder == "auto" else " (forced)", n_groups, expected,
+                     " | single chunk (groups_per_chunk ignored)" if single_chunk else "",
+                     " | preview only (temp folder, not kept)" if preview_only else "")
 
-        out_dir = folder_paths.get_output_directory()
+        # preview: the core Preview Image pattern -- temp folder, random suffix so two
+        # previews in one run cannot collide, served to the frontend as type "temp"
+        if preview_only:
+            out_dir = folder_paths.get_temp_directory()
+            filename_prefix = filename_prefix + "_temp_" + "".join(
+                random.choice("abcdefghijklmnopqrstuvwxyz") for _ in range(5))
+            save_metadata = False
+        else:
+            out_dir = folder_paths.get_output_directory()
         full_folder, fname, counter, subfolder, _ = folder_paths.get_save_image_path(
             filename_prefix, out_dir)
         video_tmp = os.path.join(full_folder, "%s_%05d_tmp.mp4" % (fname, counter))
@@ -345,7 +390,7 @@ class MMH3StreamingSave(io.ComfyNode):
             g0 = 0
             while g0 < n_groups:
                 comfy.model_management.throw_exception_if_processing_interrupted()
-                g1 = min(g0 + int(groups_per_chunk), n_groups)
+                g1 = min(g0 + step, n_groups)
                 last = g1 >= n_groups
 
                 lo = max(0, group * g0 - group)          # one group of context
@@ -469,7 +514,8 @@ class MMH3StreamingSave(io.ComfyNode):
         return io.NodeOutput(
             final_path,
             ui={"images": [{"filename": os.path.basename(final_path),
-                            "subfolder": subfolder, "type": "output"}],
+                            "subfolder": subfolder,
+                            "type": "temp" if preview_only else "output"}],
                 "animated": (True,)},
         )
 

@@ -1,5 +1,16 @@
 # Multimodal context windows for H3
 
+> **Status 2026-11-07: core did it.** ComfyUI v0.44 (#17425) closed gaps 1 and 2 below
+> upstream, with the sibling hook this page proposed: MiniMaxH3 now implements
+> `map_context_window_to_modalities` and `context_window_modality_dims`, the stock
+> handler uses each window's own dim, and core ships its own **MiniMax H3 Context
+> Windows** node (`MiniMaxH3ContextWindows`), which also passes `causal_window_fix=False`
+> (gap 3) and windows H3 keyframe guides in the model's resize hook, which this pack's
+> handler also reaches. This pack's node is now shown as **MMH3 Context Windows**; its
+> overrides still work on the new core. The rest of this page is the
+> analysis as written against v0.30–v0.42, kept as the record of why the pack's node
+> exists.
+
 What `comfy/context_windows.py` would need to support MiniMax H3, read against
 ComfyUI `v0.30.0-1-g14b05228` and re-verified at **`v0.32.0`** (2026-08-12) — every
 line citation below still lands, including `is_multimodal` at `context_windows.py:424`

@@ -91,7 +91,7 @@ schedules are identical. The prompt count is independent — see above.
 
 ---
 
-## 3. The two carry routes
+## 3. The three carry routes
 
 Chunks are **slices of one master latent**, written back in place. So a chunk's
 first `overlap` latents already hold the previous chunk's output — there is nothing
@@ -110,8 +110,94 @@ They are passed as a **guide anchored at frame 0** — re-injected every step, n
 denoised, carrying a multi-step clip *plus its audio* at the same `cond_t`. Needs
 **#15439**, and the guide-origin wrap if references ride along.
 
-**Never run.** The construction is unit-tested; no clip has been generated through
-it. See §11.
+The chunk still renders its own version of the overlap frames, against the guide, so
+the overlap in the output is a choice. **`carry_crossfade`** (0.109.0, on by default)
+fades it from the previous chunk's frames into the new chunk's with a smoothstep, as
+mo-akkakk's H3 windows pack (MIT) does; off, the new overlap replaces the old outright.
+Video only: generated audio is not blended in latent space, and a `use_input_audio`
+track is identical on both sides.
+
+Why try it against banding and baking: with `mask`, the carried frames are pinned
+*target* rows, so the output keeps an exact copy of the previous chunk and the new
+frames grow out of it. With `keyframe`, the carry is conditioning only and every
+target frame is drawn fresh. mo-akkakk reports this hand-off keeps the picture sharp
+and the character stable over long runs, where core's blended context windows went
+soft and drifted. The model still sees a clean copy of the carry.
+
+**Fixed in 0.109.0:** with a pinned track (`use_input_audio`), every keyframe-carry
+chunk was handed the WHOLE clip's noise mask, because the chunk is built from the
+master latent and this branch never sliced it. The other branches always did. It now
+gets its own slice, so the pin holds per chunk.
+
+**Never run** on real weights before 0.109.0. The construction is unit-tested
+(`tests/test_keyframe_carry_crossfade.py`). See §11.
+
+### `ref` (dev branch, experimental)
+
+The previous chunk's tail is handed over as a **reference**: packed ahead of the clip,
+never denoised, which is how H3 is trained to receive existing footage. `mask` and
+`keyframe` both put more than one carried frame inside the target, which the base model
+only ever saw as a single first or last frame.
+
+A reference alone leaves the model to decide where the new clip starts. It re-renders
+some of the tail, a different amount on every clip, and that is why a reference join
+used to be found by trial: trim 2 latents, then 3, then 0, then different numbers for
+the next source. Two things pin it here.
+
+**The picture is pinned by one frame.** The chunk's first latent is a one-frame token,
+and it is a slot both chunks own: the previous chunk drew it, and the new chunk gets it
+as a guide at frame 0. So the new chunk starts at a known frame, and it is written back
+into the master in place like every other chunk. Nothing is trimmed.
+
+The chunk then renders its own version of the rest of the overlap, as `keyframe` does,
+and `carry_crossfade` fades or replaces it the same way. Keep the overlap short:
+`overlap_frames` 5 is two latents, the pinned frame and four more. A long overlap asks
+the model to replay that much of the reference exactly, and the fade then blends two
+takes of the same moment.
+
+**The audio is pinned by where its reference sits.** `ref_carry_audio`:
+
+| value | what the next chunk gets |
+|---|---|
+| `shifted` | The last `ref_carry_audio_seconds` as an audio reference of their own, placed on the chunk's timeline: the latents inside the overlap share their coordinates with the chunk's first audio rows, and the rest run back before frame 0. The model is shown the track up to the join. |
+| `block` | The audio under the reference frames, inside the video reference, ahead of the clip like any reference. The model hears material, not a moment, and tends to produce a sound-alike. |
+| `off` | Picture only. Right with `use_input_audio`, where the track is pinned and needs no carry. |
+
+`shifted` needs `mmh3tools/patch_ref_shift.py`, a wrap on the layout that moves only
+the rows of an audio reference carrying the pack's own key. Without that key a layout
+is stock, and the wrap tests itself at import and stands down if it cannot place a
+block where asked.
+
+The overlap's audio in the output stays the previous chunk's. It is what the audio
+reference showed the model, so the new audio takes over where that reference ends.
+
+`ref_carry_frames` (default 22) is how much of the previous chunk rides as the video
+reference, counted back from its last frame. It is independent of `overlap_frames`,
+which sets how far back the next chunk starts. The reference costs distance from the
+prompt: 5/3 of a position per frame, plus one per audio latent with `shifted`.
+
+What it needs and what it does not do:
+
+- **A reference model.** On fl2va a reference has no trained binding.
+- **#15439**, for the pinned frame alongside references.
+- **The prompt cannot name the carry.** The conds are encoded before sampling starts,
+  so the tail is appended without `<Picture N>` / `<Audio N>` tokens, as
+  `MMH3 Latent to Reference` does.
+- **A clamped last window is a `mask` carry.** The last window is pulled back onto the
+  clip end and can overlap its predecessor by seconds. Re-rendering that under the last
+  prompt would redraw frames the previous chunk owns, so that one chunk holds them with
+  a mask and the report says so.
+- **`carry_color_match` corrects the reference, not the master.** Most of the tail is
+  finished output that no later chunk redraws, so the matched copy is kept aside for
+  the next chunk's reference and pinned frame.
+- Not with `carry_noise` or `guide_video`.
+
+**Run once on real weights (2026-11-10), without the anti-burn LoRA.** The chain still
+over-bakes, as it does with `mask` and `keyframe`, so this route is not a fix for that:
+the bake follows the model reading its own output, however the tail is handed over
+(§10). The joins held without a trim; some showed a seam, none severe. Unit-tested
+against a stubbed sampler and the live layout class (`tests/test_ref_carry.py`). What is
+still open is in §11.
 
 ### No join, no trim, no loss
 
@@ -197,6 +283,30 @@ The report's per-chunk drift is then `drift N sd`: how far the frames' channel
 means sat from the anchor, in anchor standard deviations. It costs nothing
 measurable and avoids the VAE round trip, which has its own cost (§10); its seam
 step is larger.
+
+### Noisy carry — `carry_noise` (0.109.0)
+
+Core holds a masked carry at the condition timestep and re-injects it 99.9% clean at
+every step (`VISUAL_COND_TIMESTEP` = 0.999 in `scale_latent_inpaint`). The model is
+handed a near-perfect copy of the previous chunk's tail and follows it closely, baked
+detail and colour error included. That copying is what the community's drift
+measurements keep pointing at. LTX's pipelines add noise to their conditioning frames
+so the model never trusts them exactly; `carry_noise` is that idea with the amount
+yours to set:
+
+1. Before each chunk, its carried **video** latents become
+   `(1 - n) * carry + n * noise`, the same flow mix core uses with `n = 0.001`. The
+   noise is seeded from the noise seed and the chunk index.
+2. The carry is held as usual (`overlap_strength_video`), so the model conditions on
+   the noisy copy.
+3. After the chunk, the clean carry is put back. Core's masked blend leaves
+   `out * m + latent * (1 - m)` in every carried cell, and adding `(1 - m) * (clean -
+   noised)` turns that back into what the chunk would hold with a clean carry, at any
+   strength. The noise never reaches the output.
+
+The carried audio is untouched. `carry="mask"` only: a keyframe carry is a guide, which
+core injects clean at every step. On its own it did not stop chain over-bake (up to 0.2);
+0.1 is part of the recipe that did, with an anti-burn LoRA at 1.0 (§10, 2026-11-08).
 
 ---
 
@@ -509,6 +619,7 @@ not written down anywhere, including here.
 | the tail of every chunk drifts off-prompt | not `phase2_guider` — its positive is replaced per chunk. Look at the cond_set |
 | the reference video restarts from its beginning on every chunk | fewer prompts than windows, so the cond list was short and every chunk fell back to window 0. Fixed in **0.91.0**, which broadcasts one prompt across all windows and refuses any other mismatch. On an older build, write one prompt per chunk |
 | a chunk is conditioned on the wrong footage | preview the reference node's **`ref_windows`** output — two frames per chunk, first and last of its span. If they do not advance, `chunk_frames`/`overlap_frames` here do not match the sampler's |
+| banding (stepped lines in smooth gradients, e.g. a flat ceiling) from chunk 1 on, then everything over-bakes chunk after chunk (small features grow, skin and hair get crunchy) | an anti-burn LoRA at 1.0, with `overlap_strength_video` 0.6, colour match 0.4 and `carry_noise` 0.1 (§10, 2026-11-08). Carry settings alone did not fix it |
 | a long static shot "cooks": saturation, warmth and contrast climb chunk after chunk | `carry_color_match` = `first_chunk_latent` or `first_chunk` (§3, §10). On its own it holds colour, not identity or detail. With `overlap_strength_video` lowered to 0.6 as well, one 20 s test held all three (§10) |
 
 ---
@@ -595,6 +706,18 @@ not written down anywhere, including here.
   covering for it. One seed, one static shot, FastH3 at 4 steps, 512x512, so this
   is a lead, not a recipe. Long-chunk 10-step runs (a handful of handoffs instead of
   28) are untested.
+- **Chain over-bake: an anti-burn LoRA was the fix; carry settings alone were not.**
+  Observed 2026-11-08 by eye, no measurements. Static shot with a flat ceiling, fl2va
+  UNET, input audio pinned (`use_input_audio`), 12 steps beta, phase 2 from step 2
+  (`ClownSampler` then euler), no turbo LoRA. Without it, banding showed in the ceiling
+  gradient from chunk 1 and everything over-baked further each chunk (a freckle grew
+  into a mole). These did not stop it on their own: `carry_noise` up to 0.2,
+  `carry="keyframe"` (with `carry_crossfade`), and a released carry that was later
+  removed. What held: **`h3_antiburn_universal_v1` LoRA at 1.0** with `carry="mask"`,
+  `overlap_strength_video` 0.6, `carry_color_strength` 0.4 and `carry_noise` 0.1. Below
+  1.0 on the LoRA the chain fell apart again. The LoRA did most of the work; the carry
+  settings trim what is left. So the over-bake comes from the model continuing its own
+  output, not from how the carry is handed over.
 
 ## 11. Not yet measured
 
@@ -616,10 +739,20 @@ Everything here is honest about being unknown.
   frame 0, multi-step clip plus audio, no mask) and the arithmetic of the join is
   cheaper, but no output has been looked at. Everything else in this document was
   measured on `mask`.
+- **`carry="ref"` beyond one run.** Run once (2026-11-10, no anti-burn LoRA): it bakes
+  like the other routes, and the joins sometimes show a seam. Unknown: whether it holds
+  with the anti-burn recipe of §10, what the seams depend on (overlap length,
+  `carry_crossfade`, `ref_carry_frames`), whether `shifted` audio continues a generated
+  track or only resembles it, and how short the overlap can go.
 - **`overlap_strength_video` / `_audio` below 1.0.** Per-row masking binarises at
   0.5 for TIMESTEP purposes, so partial strength only blends the latent
   continuously — see `core-changes.md`. What that looks like is untested.
 - **How many chunks before drift compounds.** Other packs report photocopy-style
   degradation over chained audio; whether the masked carry avoids that is unknown.
+- **`carry_noise` on its own share.** Built 2026-11-07 against banding from chunk 1 on
+  a static shot with a flat ceiling. On real weights it did not fix the over-bake alone
+  (up to 0.2), and it is part of the recipe that held (0.1 with the anti-burn LoRA, §10).
+  Unknown: how much it adds on top of the LoRA, and where it starts to cost continuity
+  at the seam.
 - **Whether guides at interior indices behave** as #15439's author intends — it is a
   draft PR he has flagged as not fully tested.

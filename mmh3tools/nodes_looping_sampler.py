@@ -24,7 +24,7 @@ AUDIO COMES FREE. The master latent holds the whole track, so each chunk slices
 its own span out of it. No per-chunk audio input, no risk of every chunk getting
 the first chunk's music.
 
-TWO CARRY ROUTES.
+THREE CARRY ROUTES.
 
 `mask` masks the chunk's first `overlap` latents -- they already hold the
 previous chunk's output, since chunks are slices of one master -- so the model
@@ -34,7 +34,17 @@ conditions on them without denoising them. Needs per-row masking (#15375).
 every step, never denoised, carrying a multi-step clip plus its audio at the same
 cond_t. Needs #15439, and the guide-origin wrap when references are also present.
 
-Neither needs a join. Chunks are written back into the master in place, so there
+`ref` hands the previous chunk's tail over the way H3 was trained to receive
+existing footage: as a REFERENCE block, packed ahead of the clip and never
+denoised. A reference alone leaves the model to decide where the new clip starts
+-- it re-renders some of the tail, a different amount each time, which is why a
+reference join used to be found by trial -- so the chunk's first latent is also
+pinned as a one-frame guide at frame 0. That frame is a slot both chunks own, so
+the join has a known place. The tail's AUDIO has no such pin; it rides as its own
+reference, translated onto the chunk's timeline (patch_ref_shift) so each carried
+audio latent sits at the instant it belongs to. Needs #15439.
+
+None of them needs a join. Chunks are written back into the master in place, so there
 is no trim, no grid-safe cut, and no frames lost per seam -- all of which existed
 only because the old shape concatenated separately-allocated chunks.
 
@@ -69,9 +79,11 @@ from comfy.nested_tensor import NestedTensor
 from comfy_extras.nodes_custom_sampler import SamplerCustomAdvanced, SplitSigmas
 
 from .color_carry import anchor_stats, latent_anchor_stats, match_carry, match_carry_latent
+from . import patch_ref_shift
 from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
                      LATENT_BASE, VAE_SPATIAL, VIDEO_T_DIM,
-                     frame_at_latent, frames_to_audio_t, latents_to_frames,
+                     append_cond_list, frame_at_latent, frames_to_audio_t,
+                     frames_to_latents, latents_to_frames, make_ref_block,
                      pack_av, unpack_av)
 from .nodes_loop import per_row_mask_is_continuous
 from .nodes_multiprompt import MMH3CondSet
@@ -81,6 +93,24 @@ from .nodes_windows import _audio_index_at, _plan, _window_frame_spans
 
 _GUIDE_KEYS = ("minimax_keyframes", "minimax_frame_count")
 MASK_MODES = ["max", "min", "mean", "last"]
+REF_AUDIO_MODES = ["shifted", "block", "off"]
+
+
+def _ref_span(v0, carried, ref_latents):
+    """Master latent span [r0, r1) of the tail a `ref` carry hands to the chunk at v0.
+
+    It ENDS where the previous chunk ends (v0 + carried) and is `ref_latents` long, cut
+    in whole 5-latent groups so it starts on the same latent phase as the chunk does:
+    a tail that starts on phase 0 opens with a one-frame token, which is what a fresh
+    encode of those frames would give, and so what a reference clip looks like. Shorter
+    when the clip does not reach back that far.
+    """
+    groups = min((int(ref_latents) - carried) // LATENTS_PER_GROUP,
+                 v0 // LATENTS_PER_GROUP)
+    while carried + LATENTS_PER_GROUP * groups < 1:      # never an empty tail
+        groups += 1
+    r1 = v0 + carried
+    return r1 - (carried + LATENTS_PER_GROUP * groups), r1
 
 
 def _strip_guide_keys(cond, label):
@@ -270,6 +300,57 @@ def _chunk_noise(noise, index):
     return n
 
 
+# Far from _chunk_noise's `seed + index`, so the carry noise never repeats a chunk's.
+CARRY_NOISE_SEED_OFFSET = 2000003
+
+
+def _noise_carry(chunk, latent, sub_v, sub_a, carried, amount, seed, index):
+    """Give the carried video latents fresh noise ONCE, before the chunk samples.
+
+    Core holds a carry at the condition timestep and re-injects it 99.9% clean every
+    step (VISUAL_COND_TIMESTEP = 0.999 in scale_latent_inpaint), so the model is handed
+    a near-perfect copy of its own previous output and follows it closely -- the
+    copying that drift measurements keep pointing at. LTX's pipelines add noise to their
+    conditioning frames for this reason. Here the carry becomes the flow mix
+    (1 - amount) * carry + amount * noise, the same form core uses with 0.001, and is
+    held as usual. Video only.
+
+    Returns (chunk, clean carry, noised carry); the caller puts the clean carry back
+    after sampling (_restore_carry), so the noise never reaches the output.
+    """
+    g = torch.Generator(device="cpu").manual_seed(
+        (int(seed or 0) + CARRY_NOISE_SEED_OFFSET + int(index)) % (2 ** 63))
+    clean = sub_v[:, :, :carried].clone()
+    eps = torch.randn(clean.shape, generator=g, dtype=torch.float32).to(clean.device,
+                                                                        clean.dtype)
+    noised = (1.0 - amount) * clean + amount * eps
+    v = sub_v.clone()
+    v[:, :, :carried] = noised
+    return pack_av(latent, v, sub_a, noise_mask=chunk.get("noise_mask")), clean, noised
+
+
+def _restore_carry(dv, clean, noised, mask):
+    """Take the carry noise back out of a sampled chunk.
+
+    Core's inpainting blend leaves out*m + latent_image*(1 - m) in every masked cell,
+    and latent_image held the NOISED carry. Adding (1 - m) * (clean - noised) turns that
+    into out*m + clean*(1 - m): exactly what the chunk would hold had the carry not been
+    noised, at any overlap_strength_video.
+    """
+    vm = mask.unbind()[0] if isinstance(mask, NestedTensor) else mask
+    c = int(clean.shape[2])
+    keep = (1.0 - vm[:, :, :c]).to(device=dv.device, dtype=dv.dtype)
+    dv = dv.clone()
+    dv[:, :, :c] = dv[:, :, :c] + keep * (clean - noised).to(device=dv.device, dtype=dv.dtype)
+    return dv
+
+
+def _smoothstep(n):
+    """n weights rising 0 -> 1 with zero slope at both ends, end points excluded."""
+    t = torch.linspace(0.0, 1.0, n + 2)[1:-1]
+    return t * t * (3.0 - 2.0 * t)
+
+
 def _parse_indices(text, total_frames):
     """Comma-separated GLOBAL pixel-frame indices; negatives count from the end.
 
@@ -416,14 +497,22 @@ class MMH3LoopingSampler(io.ComfyNode):
                             "that is a multiple of 5 rather than 5m+2 walks the phase "
                             "0,2,4,1,3, which is a five-chunk beat."),
                 io.Combo.Input(
-                    "carry", options=["mask", "keyframe"], default="mask",
+                    "carry", options=["mask", "keyframe", "ref"], default="mask",
                     tooltip="HOW the previous chunk reaches the next.\n\n"
                             "'mask' masks the overlap latents, which already hold the "
                             "previous chunk's output, so the model conditions on them "
                             "without denoising them. Needs #15375.\n\n"
                             "'keyframe' passes them as a GUIDE anchored at frame 0 -- "
                             "re-injected every step, never denoised, carrying the audio "
-                            "at the same coordinate. Needs #15439."),
+                            "at the same coordinate. Needs #15439.\n\n"
+                            "'ref' passes the previous chunk's tail as a REFERENCE "
+                            "(`ref_carry_frames`), the way H3 is trained to receive "
+                            "existing footage, and pins the chunk's first frame as a "
+                            "one-frame guide so the join has a known place. The chunk "
+                            "renders its own overlap from that frame. Use a reference "
+                            "(ref2va) model and a short overlap (5 frames). Needs "
+                            "#15439. EXPERIMENTAL. It does not stop a chain "
+                            "over-baking; that still needs the anti-burn LoRA."),
                 io.Float.Input(
                     "overlap_strength_video", default=1.0, min=0.0, max=1.0, step=0.05,
                     tooltip="1.0 preserves the carried region outright, 0.0 regenerates "
@@ -540,8 +629,9 @@ class MMH3LoopingSampler(io.ComfyNode):
                 # rather than deleted: `execute` still accepts `prior_av_latent=None`
                 # and the prepend/pad/phase implementation below is untouched.
                 # Restore by MOVING it to the end of this list, after
-                # carry_color_strength (guide_video was added 0.105.0 and the
-                # carry colour inputs 0.106.0 while this was hidden). Uncommenting
+                # ref_carry_audio_seconds (guide_video was added 0.105.0, the carry
+                # colour inputs 0.106.0, carry_noise and carry_crossfade 0.109.0 and
+                # the ref_carry inputs after them while this was hidden). Uncommenting
                 # it in place would insert it ahead of them and shift guide_video's
                 # socket in saved graphs.
                 # io.Latent.Input(
@@ -599,6 +689,66 @@ class MMH3LoopingSampler(io.ComfyNode):
                     tooltip="Blend between the carry as sampled (0) and fully "
                             "colour-matched (1). Used only when carry_color_match is "
                             "not off."),
+                io.Float.Input(
+                    "carry_noise", default=0.0, min=0.0, max=0.5, step=0.01,
+                    optional=True,
+                    tooltip="Hand the next chunk a slightly NOISY copy of the carry "
+                            "instead of an exact one (0 = off). Before each chunk, the "
+                            "carried video latents become (1 - n) * carry + n * fresh "
+                            "noise, once, and are held as usual. After the chunk, the "
+                            "clean carry is put back, so the output never contains the "
+                            "noise.\n\n"
+                            "Core already holds a carry at 0.999 clean (n = 0.001). LTX "
+                            "noises its conditioning frames on purpose so the model "
+                            "never copies them exactly; this is that idea, with the "
+                            "amount yours to set. Untested on H3: start around 0.02-"
+                            "0.05. Video only; the carried audio is untouched. `mask` "
+                            "carry only."),
+                io.Boolean.Input(
+                    "carry_crossfade", default=True, optional=True,
+                    tooltip="carry='keyframe' and carry='ref'. The chunk renders its own "
+                            "version of the overlap there. On: "
+                            "the overlap in the output fades from the previous chunk's "
+                            "frames to the new chunk's (smoothstep), so the seam is a "
+                            "blend. Off: the new chunk's overlap replaces the previous "
+                            "one outright.\n\n"
+                            "Video only: audio is not blended in latent space, and a "
+                            "track pinned by use_input_audio is the same on both sides "
+                            "anyway."),
+                io.Int.Input(
+                    "ref_carry_frames", default=22, min=5, max=3600, step=17,
+                    optional=True,
+                    tooltip="carry='ref' only. Frames of the previous chunk's tail handed "
+                            "to the next chunk as a video reference, counted back from "
+                            "the previous chunk's last frame. Snapped to a clip length "
+                            "(17k+5). Independent of overlap_frames, which sets how far "
+                            "back the next chunk STARTS.\n\n"
+                            "A longer reference shows more motion but pushes the clip "
+                            "further from the prompt (5/3 of a position per frame), and "
+                            "the model tends to replay what it is shown."),
+                io.Combo.Input(
+                    "ref_carry_audio", options=REF_AUDIO_MODES, default="shifted",
+                    optional=True,
+                    tooltip="carry='ref' only. How the previous chunk's AUDIO reaches the "
+                            "next.\n\n"
+                            "shifted: the last `ref_carry_audio_seconds` ride as their own "
+                            "audio reference, placed on the chunk's timeline so every "
+                            "carried audio latent sits at the instant it belongs to: the "
+                            "part inside the overlap lines up with the chunk's first "
+                            "frames and the rest runs back before frame 0. The model is "
+                            "shown the track up to the join and continues it.\n"
+                            "block: the audio under the reference frames rides inside "
+                            "the video reference, ahead of the clip like any reference. "
+                            "The model hears it as material, not as a moment.\n"
+                            "off: picture only. Right when the track is pinned by "
+                            "use_input_audio, which needs no carry."),
+                io.Float.Input(
+                    "ref_carry_audio_seconds", default=2.0, min=0.1, max=30.0, step=0.1,
+                    optional=True,
+                    tooltip="ref_carry_audio='shifted' only. Seconds of the previous "
+                            "chunk's audio carried, counted back from its end. 40 audio "
+                            "latents per second, each one position further from the "
+                            "prompt."),
             ],
             outputs=[
                 io.Latent.Output(display_name="latent"),
@@ -615,10 +765,36 @@ class MMH3LoopingSampler(io.ComfyNode):
                 keyframes=None, keyframe_indices="", vae=None,
                 prior_av_latent=None, denoise_mask=None, denoise_mask_mode="max",
                 audio_denoise_mask=None, guide_video=None, carry_color_match="off",
-                carry_color_strength=1.0) -> io.NodeOutput:
+                carry_color_strength=1.0, carry_noise=0.0,
+                carry_crossfade=True, ref_carry_frames=22, ref_carry_audio="shifted",
+                ref_carry_audio_seconds=2.0) -> io.NodeOutput:
         conds = (cond_set or {}).get("conds") or []
         if not conds:
             raise ValueError("MMH3LoopingSampler: cond_set holds no conditioning.")
+        carry_noise = float(carry_noise or 0.0)
+        if carry_noise > 0 and carry == "keyframe":
+            raise ValueError(
+                "MMH3LoopingSampler: carry_noise needs carry='mask'. A keyframe carry is a "
+                "guide, which core injects clean at every step.")
+        if carry_noise > 0 and carry == "ref":
+            raise ValueError(
+                "MMH3LoopingSampler: carry_noise needs carry='mask'. A reference carry "
+                "holds nothing in the chunk to add noise to.")
+        ref_audio = ref_carry_audio or "shifted"
+        ref_lat = frames_to_latents(int(ref_carry_frames or 22))
+        ref_audio_t = max(1, int(round(float(ref_carry_audio_seconds or 2.0)
+                                       * AUDIO_LATENT_FPS)))
+        if carry == "ref":
+            if not _guides_available():
+                raise RuntimeError(
+                    "MMH3LoopingSampler: carry='ref' pins each chunk's first frame as a "
+                    "guide alongside its references, which needs any-index guides "
+                    "(upstream PR #15439). See docs/core-changes.md.")
+            if ref_audio == "shifted" and not patch_ref_shift.is_applied():
+                raise RuntimeError(
+                    "MMH3LoopingSampler: ref_carry_audio='shifted' needs the pack's "
+                    "reference-shift patch, which did not install on this ComfyUI (the "
+                    "startup log says why). Use ref_carry_audio='block' or 'off'.")
         color_on = (carry_color_match or "off") != "off"
         color_latent = carry_color_match == "first_chunk_latent"
         if color_on and not color_latent and vae is None:
@@ -764,6 +940,32 @@ class MMH3LoopingSampler(io.ComfyNode):
                          % (carry_color_match, float(carry_color_strength),
                             "matched per latent channel" if color_latent else
                             "decoded, matched in Lab and re-encoded"))
+        if carry == "keyframe":
+            lines.append("keyframe carry: the overlap is re-rendered against the carried "
+                         "frames as a guide; %s"
+                         % ("faded in from the previous chunk's frames (carry_crossfade)"
+                            if carry_crossfade else "the new overlap replaces the old"))
+        if carry == "ref":
+            if n > 1 and overlap <= 0:
+                raise ValueError(
+                    "MMH3LoopingSampler: carry='ref' needs an overlap. The chunk's first "
+                    "frame is the one both chunks share, and with overlap_frames 0 there "
+                    "is no such frame. 5 is the smallest and the one to start with.")
+            lines.append(
+                "ref carry: the previous chunk's last %d frames ride as a video "
+                "reference and the chunk's first frame is pinned as a guide; audio %s; "
+                "the chunk renders its own overlap, %s"
+                % (latents_to_frames(ref_lat),
+                   {"shifted": "as its own reference on the chunk's timeline (last %.2fs)"
+                               % (ref_audio_t / float(AUDIO_LATENT_FPS)),
+                    "block": "inside the video reference",
+                    "off": "not carried"}[ref_audio] if master_a is not None
+                   else "absent (video-only latent)",
+                   "faded in from the previous chunk's frames (carry_crossfade)"
+                   if carry_crossfade else "which replaces the old"))
+        if carry_noise > 0:
+            lines.append("carry noise %.2f:each chunk is handed (1 - n) * carry + n * noise "
+                         "once, and the clean carry is put back after it" % carry_noise)
         if prior_t:
             lines.append("prior: %d latents (%d frames, %.2fs) kept verbatim; generating "
                          "from frame %d, carrying %d frames of it"
@@ -865,6 +1067,10 @@ class MMH3LoopingSampler(io.ComfyNode):
                 raise ValueError(
                     "MMH3LoopingSampler: guide_video and carry='keyframe' both anchor a "
                     "guide at every chunk's frame 0. Use carry='mask' with guide_video.")
+            if carry == "ref":
+                raise ValueError(
+                    "MMH3LoopingSampler: guide_video and carry='ref' both anchor a guide "
+                    "at every chunk's frame 0. Use carry='mask' with guide_video.")
             if keyframes is not None and wanted:
                 raise ValueError(
                     "MMH3LoopingSampler: guide_video already covers every frame, so "
@@ -943,6 +1149,7 @@ class MMH3LoopingSampler(io.ComfyNode):
         # can change a render.
         preview = begin_preview(getattr(guider, "model_patcher", None), len(windows))
         anchor = None    # carry colour anchor: chunk 0's decoded frames, taken after it renders
+        ref_matched = None    # (r0, r1, latents): the next ref carry's tail, colour-matched
 
         for i, w in enumerate(windows):
             idx = w.index_list
@@ -971,6 +1178,14 @@ class MMH3LoopingSampler(io.ComfyNode):
                                            overlap))
                 logging.info("[MMH3LoopingSampler] %s", lines[-1].strip())
 
+            carry_clean = carry_noised = None
+            # A reference carry re-renders its overlap, so it can only stand in for the
+            # NOMINAL one. The last window is clamped back onto the clip end and can
+            # overlap its predecessor by seconds; re-rendering that would redraw, under
+            # this chunk's prompt, content the previous chunk already owns. That chunk
+            # falls back to the mask carry, which keeps it.
+            ref_here = bool(carried) and carry == "ref" and carried <= overlap
+            ref_note = ""
             sub_v = out_v[:, :, v0:v1].clone()
             sub_a = None if out_a is None else out_a[:, :, :, a0:a1].clone()
             chunk = pack_av(latent, sub_v, sub_a, noise_mask=None)
@@ -987,12 +1202,78 @@ class MMH3LoopingSampler(io.ComfyNode):
                     if ca > 0:
                         kf["audio_latent"] = sub_a[:, :, :, :ca].contiguous()
                 chunk_guides.insert(0, kf)
+                # pack_av copied the WHOLE clip's noise_mask into the chunk (a pinned
+                # use_input_audio track arrives that way); slice it to this chunk, as
+                # the other branches do, or core resizes a full-length mask onto it
+                if in_mask_v is not None or in_mask_a is not None:
+                    chunk["noise_mask"] = _sliced_mask(sub_v, sub_a, in_mask_v, in_mask_a,
+                                                       v0, v1, a0, a1)
+                else:
+                    chunk.pop("noise_mask", None)
+            elif ref_here:
+                # The tail is cut from the master, where the previous chunk left it, or
+                # from the colour-matched copy made after that chunk -- never both, and
+                # the master itself is not altered: these frames are finished output.
+                r0, r1 = _ref_span(v0, carried, ref_lat)
+                tail_v = out_v[:, :, r0:r1]
+                if ref_matched is not None and ref_matched[:2] == (r0, r1):
+                    tail_v = ref_matched[2].to(out_v.device, out_v.dtype)
+                tail_v = tail_v.contiguous()
+                # the chunk's first latent: a one-frame token, and the frame both chunks
+                # own. Taken from the tail when the tail reaches back that far, so a
+                # colour-matched tail and its pinned frame agree.
+                first = (tail_v[:, :, v0 - r0:v0 - r0 + 1] if r0 <= v0
+                         else sub_v[:, :, :1]).contiguous()
+                lh, lw = int(tail_v.shape[3]), int(tail_v.shape[4])
+                ra1 = _audio_index_at(r1, total_t, total_a)
+                blocks = []
+                if sub_a is None or ref_audio == "off":
+                    blocks.append(make_ref_block(tail_v, None, lh, lw, 0))
+                    ref_note = ", ref frames %d-%d" % (frame_at_latent(r0),
+                                                       frame_at_latent(r1) - 1)
+                elif ref_audio == "block":
+                    ra0 = _audio_index_at(r0, total_t, total_a)
+                    blocks.append(make_ref_block(
+                        tail_v, out_a[:, :, :, ra0:ra1].contiguous(), lh, lw, ra1 - ra0))
+                    ref_note = ", ref frames %d-%d with their audio" % (
+                        frame_at_latent(r0), frame_at_latent(r1) - 1)
+                else:
+                    blocks.append(make_ref_block(tail_v, None, lh, lw, 0))
+                    na = min(ref_audio_t, ra1)
+                    ref_note = ", ref frames %d-%d" % (frame_at_latent(r0),
+                                                       frame_at_latent(r1) - 1)
+                    if na > 0:
+                        ablk = make_ref_block(
+                            None, out_a[:, :, :, ra1 - na:ra1].contiguous(), 0, 0, na)
+                        # where the block ENDS, in audio latents past the chunk's first:
+                        # the previous chunk's end, so row for row it shares the chunk's
+                        # own coordinates across the overlap
+                        ablk[patch_ref_shift.KEY] = float(ra1 - a0)
+                        blocks.append(ablk)
+                        ref_note += ", audio %.2fs ending %.2fs into the chunk" % (
+                            na / float(AUDIO_LATENT_FPS),
+                            (ra1 - a0) / float(AUDIO_LATENT_FPS))
+                chunk_cond = append_cond_list(chunk_cond, "minimax_refs", blocks)
+                chunk_guides.insert(0, {"resolved_frame_index": 0, "latent": first})
+                if in_mask_v is not None or in_mask_a is not None:
+                    chunk["noise_mask"] = _sliced_mask(sub_v, sub_a, in_mask_v, in_mask_a,
+                                                       v0, v1, a0, a1)
+                else:
+                    chunk.pop("noise_mask", None)
             elif carried:
+                if carry == "ref":
+                    ref_note = (", MASK carry here (a clamped tail: a reference cannot "
+                                "keep %d latents the previous chunk already drew)"
+                                % carried)
                 chunk["noise_mask"] = _carry_mask(
                     sub_v, sub_a, carried,
                     _audio_index_at(v0 + carried, total_t, total_a) - a0,
                     float(overlap_strength_video), float(overlap_strength_audio),
                     in_mask_v, in_mask_a, v0, v1, a0, a1)
+                if carry_noise > 0:
+                    chunk, carry_clean, carry_noised = _noise_carry(
+                        chunk, latent, sub_v, sub_a, carried, carry_noise,
+                        getattr(noise, "seed", 0), i)
             elif in_mask_v is not None or in_mask_a is not None:
                 chunk["noise_mask"] = _sliced_mask(sub_v, sub_a, in_mask_v, in_mask_a,
                                                    v0, v1, a0, a1)
@@ -1046,9 +1327,26 @@ class MMH3LoopingSampler(io.ComfyNode):
                 phase2_sampler, g2, phase2_start_step)
 
             dv, da = unpack_av(done, "chunk %d output" % i)
+            if carry_clean is not None:
+                dv = _restore_carry(dv, carry_clean, carry_noised, chunk["noise_mask"])
+            if carried and carry_crossfade and (carry == "keyframe" or ref_here):
+                # the chunk rendered its own overlap against the guide; fade into it
+                # from what the previous chunk left there (as mo-akkakk's H3 windows do)
+                fade = _smoothstep(carried).view(1, 1, -1, 1, 1).to(dv.device, dv.dtype)
+                old = out_v[:, :, v0:v0 + carried].to(dv.device, dv.dtype)
+                dv = dv.clone()
+                dv[:, :, :carried] = old * (1.0 - fade) + dv[:, :, :carried] * fade
             out_v[:, :, v0:v1] = dv.to(out_v.dtype)
             if out_a is not None and da is not None:
-                out_a[:, :, :, a0:a1] = da.to(out_a.dtype)
+                if ref_here:
+                    # The overlap's audio stays the previous chunk's. It is what the
+                    # audio reference showed the model, so the new audio continues FROM
+                    # its end; switching tracks at the chunk's first frame instead would
+                    # put the cut where the new chunk had heard nothing yet.
+                    ca = _audio_index_at(v0 + carried, total_t, total_a) - a0
+                    out_a[:, :, :, a0 + ca:a1] = da[:, :, :, ca:].to(out_a.dtype)
+                else:
+                    out_a[:, :, :, a0:a1] = da.to(out_a.dtype)
 
             # Colour-matched carry (SoulX-FlashHead): the next chunk reads its carry
             # out of out_v, so correcting it here, in place, is all it takes -- both
@@ -1063,7 +1361,27 @@ class MMH3LoopingSampler(io.ComfyNode):
                 nv0 = windows[i + 1].index_list[0] + offset
                 nv1 = min(windows[i + 1].index_list[-1] + 1 + offset, total_t)
                 nc = min(max(0, v1 - nv0), nv1 - nv0)
-                if nc and color_latent:
+                ref_matched = None
+                if nc and carry == "ref" and nc <= overlap:
+                    # A reference carry reads a longer tail than the overlap, and most
+                    # of it is finished output no later chunk redraws. So the matched
+                    # tail is kept aside for the next chunk to cut its reference and
+                    # pinned frame from, and the master is left as sampled.
+                    nr0, nr1 = _ref_span(nv0, nc, ref_lat)
+                    if color_latent:
+                        z, drift = match_carry_latent(out_v[:, :, nr0:nr1], anchor,
+                                                      float(carry_color_strength))
+                        cc_note = ", next reference latent-matched (drift %.2f sd)" % drift
+                    else:
+                        z, drift = match_carry(vae, out_v[:, :, nr0:nr1], anchor,
+                                               float(carry_color_strength))
+                        cc_note = (", next reference colour-matched (drift dE %.1f)" % drift
+                                   if z is not None else
+                                   ", next reference NOT colour-matched (re-encode "
+                                   "changed shape)")
+                    if z is not None:
+                        ref_matched = (nr0, nr1, z)
+                elif nc and color_latent:
                     z, drift = match_carry_latent(out_v[:, :, nv0:nv0 + nc], anchor,
                                                   float(carry_color_strength))
                     out_v[:, :, nv0:nv0 + nc] = z
@@ -1080,11 +1398,11 @@ class MMH3LoopingSampler(io.ComfyNode):
                     cc_note = (", tail NOT colour-matched (%d carried latents is not a "
                                "whole clip, 5k+2)" % nc)
 
-            lines.append("  chunk %d: prompt %d, frames %d-%d, %d carried%s%s%s"
+            lines.append("  chunk %d: prompt %d, frames %d-%d, %d carried%s%s%s%s"
                          % (i, min(i, len(conds) - 1), spans[i][0], spans[i][1],
                             frame_at_latent(carried) if carried else 0,
                             ", %d keyframe(s)" % len(guides_by_chunk[i])
-                            if guides_by_chunk.get(i) else "", gv_note, cc_note))
+                            if guides_by_chunk.get(i) else "", ref_note, gv_note, cc_note))
             if preview is not None:
                 preview.chunk(i, dv, v0, v1, da)
             logging.info("[MMH3LoopingSampler] chunk %d/%d done", i + 1, n)

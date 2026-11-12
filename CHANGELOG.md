@@ -9,6 +9,22 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — Phrase Attention (branch `dev/cond-amplify`)
+
+### Added
+
+- **MiniMax H3 Phrase Attention** (`MMH3PhraseAttention`, MMH3Tools/model, experimental).
+  Makes the video model attend harder to one phrase of the prompt: `bias` is added to
+  the attention scores of the phrase's tokens in the DiT blocks, for every row, so the
+  phrase's share of attention scales by e^bias (0.7 is about x2, 2.3 about x10).
+  Negative mutes the phrase; -3 looked like the prompt without it. It patches the model
+  through the attention override, chained on top of any override already there, and
+  leaves the prompt and conditioning alone. `blocks` limits it to some of the 50 blocks.
+  Run once on real weights, one 124-frame chunk. **One prompt per run:** the phrase is
+  located from the end of the prompt, so per-chunk prompts are not supported yet. Not
+  checked with sparse attention. See [`docs/phrase-attention.md`](docs/phrase-attention.md).
+  Tests in `tests/test_phrase_attention.py`.
+
 ## [Unreleased] — 0.108.1
 
 ### Fixed

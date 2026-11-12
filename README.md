@@ -1545,6 +1545,9 @@ cap is never upscaled into it. Under 150 kbps the node warns rather than pretend
 the result is usable.
 
 ### Model
+- **MiniMax H3 Phrase Attention** — experimental. Bias the video model's attention toward
+  one phrase of the prompt; the H3 equivalent of `(phrase:1.3)`. One prompt per run for
+  now. See [`docs/phrase-attention.md`](docs/phrase-attention.md).
 - **MMH3 AdaLN Reference Patch** — take AdaLN modulation from another H3 checkpoint,
   per block. `fl2va` and `ref2va` are the same model *except* for AdaLN: attention,
   MLP, `condition_proj`, the patch projections and the output heads all measure at

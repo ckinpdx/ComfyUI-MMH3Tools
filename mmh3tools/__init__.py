@@ -26,6 +26,7 @@ from .nodes_trim import (
     MMH3SplitAV,
     MMH3TrimAV,
 )
+from .nodes_phrase_attention import MMH3PhraseAttention
 from .nodes_multiprompt import (
     MMH3CondSelect,
     MMH3CondToSet,
@@ -97,6 +98,7 @@ NODES = [
     MMH3Regenerate2KDims,
     # MMH3Tools/model
     MMH3AdaLNRefPatch,
+    MMH3PhraseAttention,
     # MMH3Tools/prompt
     MMH3AssetPlan,
     MMH3TaskSystemPrompt,

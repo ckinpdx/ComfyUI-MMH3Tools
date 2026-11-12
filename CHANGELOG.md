@@ -9,6 +9,27 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased] — 0.108.1
+
+### Fixed
+
+- **MMH3 Context Windows: `freenoise` no longer raises on current core.** Since core's own
+  H3 context-window support (#17425, 2026-10-29) the sampler wrapper calls
+  `_apply_freenoise(noise, conds, seed, model)`; the pack's override still took three
+  arguments, so turning `freenoise` on was a `TypeError` before the first step. The
+  override now takes and forwards `model`. Behaviour is otherwise unchanged: video noise is
+  shuffled on its own dim, audio is left alone. `tests/test_windows.py` §14 now pins the
+  override's signature to core's.
+
+- **Five test scripts that had drifted from core and from the pack.** No pack behaviour
+  changes. `test_windows` passes the `modality_dims` field core's `WindowingState` now
+  requires; `test_streaming_save` sets `noncausal` on its stub VAE (the stock H3 VAE, not
+  Sol-H3-VAE's decoder from #17411); `test_multiprompt` stops unpacking
+  `MMH3ReferenceMultiPrompt`'s outputs by count, which broke when `ref_windows` was
+  appended; `test_looping_sampler` checks the keyframe/index mismatch is trimmed and
+  reported (0.97.0) instead of refused; `test_audio_carry_scale` walks the tree in Python
+  instead of shelling out to `grep`, which is not on PATH outside Git Bash.
+
 ## [Unreleased] — 0.108.0
 
 ### Added

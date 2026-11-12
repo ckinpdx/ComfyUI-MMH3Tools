@@ -41,6 +41,9 @@ def make_vae(H=1, W=1):
     # copy that can silently drift from it. vae_ratio is 1 because the fake decode
     # below returns H/W unscaled.
     o.vae_ratio = 1
+    # the stock H3 VAE; Sol-H3-VAE's noncausal decoder (#17411) has a different
+    # frame grid and is not what the 17j+5 checks below describe
+    o.noncausal = False
     o.decoder = types.SimpleNamespace(out_channels=3)
     o._decode_temporal_chunks = K._decode_temporal_chunks.__get__(o)
     o.decode_output_shape = K.decode_output_shape.__get__(o)

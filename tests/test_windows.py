@@ -26,7 +26,8 @@ def make_state(total_v):
     return MMH3WindowingState(
         latents=[video, audio], guide_latents=[None, None],
         guide_entries=[None, None], keyframe_idxs=[None, None],
-        latent_shapes=[video.shape, audio.shape], dim=VIDEO_T_DIM,
+        latent_shapes=[video.shape, audio.shape],
+        modality_dims=[VIDEO_T_DIM, AUDIO_T_DIM], dim=VIDEO_T_DIM,
         is_multimodal=True, temporal_downscale_ratio=4), total_a
 
 
@@ -104,7 +105,7 @@ print("\n8. non-multimodal latents pass through untouched")
 st_plain = MMH3WindowingState(
     latents=[torch.zeros([1, 24, 57, 6, 10])], guide_latents=[None],
     guide_entries=[None], keyframe_idxs=[None], latent_shapes=None,
-    dim=VIDEO_T_DIM, is_multimodal=False, temporal_downscale_ratio=4)
+    modality_dims=[VIDEO_T_DIM], dim=VIDEO_T_DIM, is_multimodal=False, temporal_downscale_ratio=4)
 w = IndexListContextWindow(list(range(0, 17)), dim=VIDEO_T_DIM, total_frames=57)
 check("returned unchanged", st_plain.prepare_window(w, None) is w, True)
 
@@ -184,7 +185,14 @@ torch.manual_seed(1)
 v0.normal_(); a0.normal_()
 packed, shapes = comfy.utils.pack_latents([v0, a0])
 conds = [[{"model_conds": {"latent_shapes": type("C", (), {"cond": shapes})()}}]]
-out = h2._apply_freenoise(packed.clone(), conds, 42)
+# core's sampler wrapper calls this positionally with the model as a 4th argument
+# (since #17425); an override that lags the signature is a TypeError with freenoise on
+import inspect
+from comfy.context_windows import IndexListContextHandler
+check("override takes what core passes",
+      list(inspect.signature(MMH3ContextHandler._apply_freenoise).parameters),
+      list(inspect.signature(IndexListContextHandler._apply_freenoise).parameters))
+out = h2._apply_freenoise(packed.clone(), conds, 42, None)
 nv, na = comfy.utils.unpack_latents(out, shapes)
 check("video noise changed", bool((nv != v0).any()), True)
 check("audio noise UNTOUCHED", bool((na == a0).all()), True)

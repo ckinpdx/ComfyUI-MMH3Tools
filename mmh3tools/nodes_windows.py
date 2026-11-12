@@ -369,7 +369,7 @@ class MMH3ContextHandler(IndexListContextHandler):
                     IndexListCallbacks.EXECUTE_CLEANUP, self.callbacks):
                 callback(self, model, x_in, conds, timestep, model_options)
 
-    def _apply_freenoise(self, noise, conds, seed):
+    def _apply_freenoise(self, noise, conds, seed, model):
         """Shuffle the VIDEO noise only, on its own dim.
 
         FreeNoise copies each window's noise forward into the next window's region,
@@ -386,7 +386,7 @@ class MMH3ContextHandler(IndexListContextHandler):
         """
         shapes = self._get_latent_shapes(conds)
         if shapes is None or len(shapes) < 2:
-            return super()._apply_freenoise(noise, conds, seed)
+            return super()._apply_freenoise(noise, conds, seed, model)
 
         mods = list(comfy.utils.unpack_latents(noise, shapes))
         apply_freenoise(mods[0], VIDEO_T_DIM, self.context_length,

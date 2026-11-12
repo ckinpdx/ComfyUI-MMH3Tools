@@ -129,13 +129,20 @@ for sigma in (0.5, 0.15, 0.05):
 check("a shift disagreement really does mis-scale the carry", worst > 0.05, True)
 
 print("\n4. is anything in the live install setting those overrides?")
-import subprocess
-hits = subprocess.run(
-    ["grep", "-rn", "minimax_h3_sigma_shift", "--include=*.py",
-     os.path.abspath(os.path.join(_HERE, "..", "..", "..", "comfy")),
-     os.path.abspath(os.path.join(_HERE, "..", "..", "..", "comfy_extras")),
-     os.path.abspath(os.path.join(_HERE, "..", "..")),
-     ], capture_output=True, text=True).stdout.strip().splitlines()
+# walked in Python rather than shelling out to grep, which is not on PATH outside Git Bash
+hits = []
+for _root in (os.path.abspath(os.path.join(_HERE, "..", "..", "..", "comfy")),
+              os.path.abspath(os.path.join(_HERE, "..", "..", "..", "comfy_extras")),
+              os.path.abspath(os.path.join(_HERE, "..", ".."))):
+    for _dir, _subdirs, _files in os.walk(_root):
+        for _name in _files:
+            if not _name.endswith(".py"):
+                continue
+            _path = os.path.join(_dir, _name)
+            with open(_path, encoding="utf-8", errors="ignore") as _fh:
+                for _n, _line in enumerate(_fh, 1):
+                    if "minimax_h3_sigma_shift" in _line:
+                        hits.append("%s:%d:%s" % (_path, _n, _line.rstrip()))
 for h in hits:
     print("     " + h.split("ComfyUI")[-1][:120])
 check("the override key exists in core", any("sigma_shift" in h for h in hits), True)

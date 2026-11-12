@@ -206,8 +206,6 @@ print("\n10b. what is refused")
 # one graph can be reused across passes that do and do not anchor. See the
 # "keyframe_indices without keyframes" section below.
 for kw, err in ((dict(kf=torch.zeros([1, 64, 64, 3]), kf_idx="0"), "vae"),
-                (dict(kf=torch.zeros([2, 64, 64, 3]), kf_idx="0", vae=FakeVae()),
-                 "zipped"),
                 (dict(kf=torch.zeros([1, 64, 64, 3]), kf_idx="99999",
                       vae=FakeVae()), "outside the clip")):
     try:
@@ -215,6 +213,14 @@ for kw, err in ((dict(kf=torch.zeros([1, 64, 64, 3]), kf_idx="0"), "vae"),
         check("refused: %s" % err, False, True)
     except (ValueError, RuntimeError) as e:
         check("refused: %s" % err, err in str(e), True)
+
+print("\n10c. a keyframe/index count mismatch is trimmed and reported, not refused")
+# since 0.97.0: images and indices are zipped, the surplus of either is dropped
+vae = FakeVae()
+(_o, _n, rep_mm), _g = run(kf=torch.zeros([2, 64, 64, 3]), kf_idx="0", vae=vae)
+check("only the paired image is encoded", vae.calls, 1)
+check("one keyframe placed", len([l for l in rep_mm.splitlines() if "keyframe frame" in l]), 1)
+check("the drop is in the report", "kept 1, dropped the last 1 keyframe image(s)" in rep_mm, True)
 
 print("\n11. a Basic Guider has no negative")
 class BasicGuider:

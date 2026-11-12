@@ -41,7 +41,7 @@ def run(prompts, refs):
         clip=FakeClip(), vae=FakeVae(), audio_vae=FakeVae(),
         width=1344, height=768, length=192, ref_image_size="match",
         prompts=text, ref_images=refs,
-    ).result
+    ).result[:3]  # outputs are append-only; ref_windows came after these three
 
 
 fails = []
@@ -202,7 +202,7 @@ except ValueError as e:
 _, lat_off, _ = mp.MMH3ReferenceMultiPrompt.execute(
     clip=FakeClip(), vae=FakeVae(), audio_vae=FakeAudioVae(),
     width=1344, height=768, length=192, ref_image_size="match",
-    prompts="a", ref_images=None).result
+    prompts="a", ref_images=None).result[:3]
 check("off leaves the half empty and adds no mask",
       "noise_mask" in lat_off, False)
 

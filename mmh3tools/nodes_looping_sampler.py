@@ -1314,7 +1314,7 @@ class MMH3KeyframePlanner(io.ComfyNode):
                 "`keyframes` batch needs, in that order."
             ),
             inputs=[
-                io.Int.Input("total_frames", default=192, min=5, max=3600, step=17,
+                io.Int.Input("total_frames", default=192, min=5, max=14405, step=17,
                              tooltip="The whole clip, same as the sampler's latent."),
                 io.Int.Input("chunk_frames", default=192, min=5, max=3600, step=17,
                              tooltip="Same value the sampler gets."),

@@ -526,7 +526,7 @@ class MMH3ReferenceMultiPrompt(io.ComfyNode):
                 io.Int.Input("width", default=1344, min=32, max=16384, step=32),
                 io.Int.Input("height", default=768, min=32, max=16384, step=32),
                 io.Int.Input("length", display_name="total_frames",
-                             default=192, min=5, max=3600, step=17,
+                             default=192, min=5, max=14405, step=17,
                              tooltip="Frames at 24 fps for the latent this node emits, "
                                      "shared by every prompt. Snapped to the 17j+5 grid.\n\n"
                                      "MMH3 Looping Sampler and MMH3 Context Windows both "

@@ -245,7 +245,6 @@ in [`docs/nodes.md`](docs/nodes.md).
 | video latents | `5j + 2` |
 | audio latents | `round(frames / 24 * 40)` |
 | trained range | 124–362 frames (about 5.2–15.1 s) |
-| node ceiling | 3600 frames (150 s) |
 
 Durations are discrete: 8.000 s (192 frames) is the only whole-second length between
 4 and 15 s. The calculators and the Chunk Schedule snap for you.

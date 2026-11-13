@@ -19,6 +19,12 @@ the entry, and migrate any local workflow in the same commit.
 
 ### Changed
 
+- **`total_frames` can be typed up to 14,405 (600 s)** on Reference (Multi-Prompt),
+  Window Plan, Window Context, Split Audio to Windows and Keyframe Planner, matching
+  Chunk Schedule. It was capped at 3600 (150 s), a limit that applied only to a typed
+  value: a wired one was never checked, so longer clips already worked through Chunk
+  Schedule. The README's "node ceiling" row is gone.
+
 - **MiniMax H3 Image Keyframe takes any frame.** It refused everything but the first
   and last frame, with an error pointing at a branch, from when core could not place
   interior anchors. `frame_index` is now any frame of the chunk, and negatives count

@@ -635,7 +635,7 @@ class MMH3WindowPlan(io.ComfyNode):
             ),
             inputs=[
                 io.Int.Input(
-                    "total_frames", default=192, min=5, max=3600, step=17,
+                    "total_frames", default=192, min=5, max=14405, step=17,
                     tooltip="Length of the whole clip. Wire MMH3 Frame Calculator's "
                             "frame_count. Snapped UP to the 17j+5 grid.",
                 ),
@@ -797,7 +797,7 @@ class MMH3WindowContext(io.ComfyNode):
                             "MMH3 Split Audio to Windows gets, so the text and the "
                             "audio describe the same span."),
                 io.Int.Input(
-                    "total_frames", default=192, min=5, max=3600, step=17,
+                    "total_frames", default=192, min=5, max=14405, step=17,
                     tooltip="Length of the whole clip. Wire MMH3 Window Plan's "
                             "total_frames output."),
                 io.Int.Input(
@@ -903,7 +903,7 @@ class MMH3SplitAudioToWindows(io.ComfyNode):
             inputs=[
                 io.Audio.Input("audio"),
                 io.Int.Input(
-                    "total_frames", default=192, min=5, max=3600, step=17,
+                    "total_frames", default=192, min=5, max=14405, step=17,
                     tooltip="Length of the whole clip. Same value the plan gets.",
                 ),
                 io.Int.Input(

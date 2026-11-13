@@ -203,6 +203,23 @@ because a guide roughly doubles each chunk's sequence. `carry` stays `mask`. Bui
 from the node's unit tests and Alisson's single-generation settings; it has not yet
 been run end to end here.
 
+[`workflows/MMH3_Looping_CarryAttention.json`](../workflows/) — the test graph for
+**MiniMax H3 Carry Attention**: a static talking head from one reference image and a
+supplied audio track, 32 s in 5 chunks, `carry="mask"`, no anti-burn LoRA. The node sits
+in the model chain ahead of the guider and scheduler. As saved, `carry_bias` is -1 and
+`reference_bias` is 2. Run it with both at 0 on the same seed for the comparison. See
+[`phrase-attention.md`](phrase-attention.md#carry-attention).
+
+[`workflows/MMH3_Looping_PhraseAttention.json`](../workflows/) — the same graph with
+**MiniMax H3 Phrase Attention** in place of Carry Attention. The phrase "emphatic head
+movements and sharply raised eyebrows" is in the prompt, and the node biases it at 3.
+It takes the CLIP for its tokenizer and the same `cond_set` the sampler runs; its
+`report` output says where the phrase was found. Fill `schedule` to change the bias per
+chunk. Built from the Carry Attention graph and not yet run as saved.
+
+Both graphs need only RES4LYF, KJNodes and VideoHelperSuite beyond this pack. Nodes are
+coloured by role: green inputs, red model loaders, yellow generation, purple outputs.
+
 [`workflows/MMH3_Outpaint.json`](../workflows/) — reframing, not generation: a landscape
 clip is encoded with **MMH3 Streaming Encode**, extended in the latent by **MMH3
 Outpaint Latent**, and **MMH3 Reframe Pads** solves the pad geometry for a 9:16 target.

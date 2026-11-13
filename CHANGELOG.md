@@ -11,6 +11,12 @@ the entry, and migrate any local workflow in the same commit.
 
 ## [Unreleased]
 
+### Added
+
+- **Two example workflows**: `MMH3_Looping_CarryAttention` and
+  `MMH3_Looping_PhraseAttention`, the same 32 s talking-head graph with each node in
+  the model chain. Notes in [`docs/workflows.md`](docs/workflows.md).
+
 ### Changed
 
 - **MiniMax H3 Image Keyframe takes any frame.** It refused everything but the first

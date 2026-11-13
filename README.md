@@ -56,7 +56,8 @@ sequence. These nodes bias how much of it the model reads.
   prompt, or mute it, with a per-chunk schedule. `value_scale` removes or subtracts
   what the phrase contributes.
 
-Details and limits: [`docs/phrase-attention.md`](docs/phrase-attention.md).
+Details and limits: [`docs/phrase-attention.md`](docs/phrase-attention.md). Each has
+an example workflow.
 
 ### Prompt writing
 
@@ -122,6 +123,8 @@ node packs they need, are in [`docs/workflows.md`](docs/workflows.md).
 | `MMH3_Looping_Cinematic` | Text to video film pipeline: definitions, beats and shots written in stages. |
 | `MMH3_Looping_Monologue` | One locked-off talking head. The strictest test of the joins. |
 | `MMH3_LoopingSampler_MusicVideo` | Windows locked to the song, lyrics mapped per window. |
+| `MMH3_Looping_CarryAttention` | Carry Attention on a 32 s talking head: less attention on the carry, more on the reference image. |
+| `MMH3_Looping_PhraseAttention` | The same graph with Phrase Attention biasing one phrase of the prompt. |
 | `MMH3_Looping_RefVideo_Chunked` | A reference video cut to each chunk's own span. |
 | `MMH3_Looping_I2V_ControlNet` | Fun ControlNet driving the generate pass. |
 | `MMH3_LoopingSampler_Masking` | Masked video-to-video: re-render a matted subject, keep the rest. |

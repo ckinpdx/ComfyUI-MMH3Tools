@@ -159,7 +159,7 @@ def _raw_conds(guider):
     return (conds.get("positive"), conds.get("negative"))
 
 
-def _chunk_guider(guider, positive, frame0=None):
+def _chunk_guider(guider, positive, frame0=None, chunk=None, carried=0):
     """This chunk's guider: the wired one, with its POSITIVE replaced.
 
     `frame0` is published to the model as `mmh3_control_frame0` so anything reading
@@ -167,17 +167,26 @@ def _chunk_guider(guider, positive, frame0=None):
     the clip this chunk starts. Core's controlnet picks its hint frames from index 0
     and caches by shape, and every chunk shares a shape, so without this every chunk
     is driven by the control video's opening frames with no error raised.
+
+    `chunk` is published as `mmh3_chunk_index` for model patches that act per
+    chunk; the model sees a packed sequence and cannot tell chunks apart itself.
+    `carried` is published as `mmh3_carried_latents`: how many of the chunk's first
+    video latents are a mask carry.
     """
     new_g = copy.copy(guider)
     # SHALLOW copy shares original_conds; set_conds assigns into it. Rebind
     # before touching it or chunk 0 clobbers the base conditioning.
     new_g.original_conds = dict(guider.original_conds)
-    if frame0 is not None:
+    if frame0 is not None or chunk is not None:
         # model_options is shared by the same shallow copy, so rebind BOTH levels
         # rather than writing the offset into the caller's guider.
         opts = dict(getattr(guider, "model_options", {}) or {})
         opts["transformer_options"] = dict(opts.get("transformer_options", {}))
-        opts["transformer_options"]["mmh3_control_frame0"] = int(frame0)
+        if frame0 is not None:
+            opts["transformer_options"]["mmh3_control_frame0"] = int(frame0)
+        if chunk is not None:
+            opts["transformer_options"]["mmh3_chunk_index"] = int(chunk)
+            opts["transformer_options"]["mmh3_carried_latents"] = int(carried)
         new_g.model_options = opts
     _, negative = _raw_conds(guider)
     if negative is None:
@@ -1030,12 +1039,15 @@ class MMH3LoopingSampler(io.ComfyNode):
             # frame_at_latent, NOT latents_to_frames: v0 is an arbitrary window
             # bound, and latents_to_frames is only meaningful on the 5j+2 grid --
             # it answers -12 for index 1.
-            g = _chunk_guider(guider, chunk_cond, frame0=frame_at_latent(v0))
+            mask_carried = 0 if carry == "keyframe" else carried
+            g = _chunk_guider(guider, chunk_cond, frame0=frame_at_latent(v0), chunk=i,
+                              carried=mask_carried)
             # The phase-2 guider gets THIS chunk's conditioning too. Only its
             # guidance settings are wanted; its own positive would hand the tail
             # of every chunk whatever prompt happens to be wired to it.
             g2 = None if phase2_guider is None else _chunk_guider(
-                phase2_guider, chunk_cond, frame0=frame_at_latent(v0))
+                phase2_guider, chunk_cond, frame0=frame_at_latent(v0), chunk=i,
+                carried=mask_carried)
             if preview is not None:
                 # Before, not after: the per-step callback fires during the sample
                 # and needs to know which chunk it is watching.

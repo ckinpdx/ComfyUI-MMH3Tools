@@ -9,7 +9,7 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
-## [Unreleased] — Phrase Attention (branch `dev/cond-amplify`)
+## 0.109.0 — Phrase and Carry Attention, README rewrite
 
 ### Added
 
@@ -20,10 +20,44 @@ the entry, and migrate any local workflow in the same commit.
   Negative mutes the phrase; -3 looked like the prompt without it. It patches the model
   through the attention override, chained on top of any override already there, and
   leaves the prompt and conditioning alone. `blocks` limits it to some of the 50 blocks.
-  Run once on real weights, one 124-frame chunk. **One prompt per run:** the phrase is
-  located from the end of the prompt, so per-chunk prompts are not supported yet. Not
-  checked with sparse attention. See [`docs/phrase-attention.md`](docs/phrase-attention.md).
+  A phrase is a few tokens among thousands of rows, so useful values are large: 6 still
+  held together on one clip, 10 did not. Takes the sampler's `cond_set`, so with a prompt
+  per chunk every chunk whose prompt has the phrase is biased and the rest are left alone.
+  `schedule` sets the bias per chunk (`chunk: bias` per line), which also works with one
+  repeated prompt. `value_scale` (not run on real weights) multiplies what the phrase's
+  tokens contribute once attended to: 0 removes its content, negative subtracts it.
+  Per-chunk behaviour is tests only; real-weights runs so far are one
+  124-frame chunk. Not checked with sparse attention. See [`docs/phrase-attention.md`](docs/phrase-attention.md).
   Tests in `tests/test_phrase_attention.py`.
+
+- **Looping Sampler publishes the chunk index** to the model as
+  `transformer_options["mmh3_chunk_index"]`, next to `mmh3_control_frame0`, for model
+  patches that act per chunk, and how many of the chunk's first video latents are a mask
+  carry as `mmh3_carried_latents`. Nothing else changes.
+
+- **MiniMax H3 Carry Attention** (experimental). The same bias on the video rows a
+  `carry="mask"` chunk carries from the previous one (`carry_bias`): negative makes the chunk read its
+  carry less, with the carry left clean. A test of whether chain over-bake eases when
+  the model reads its own output less; on one clip a bias of -2 held the joins with a
+  slight bake left, and -3 and -4 broke them; `reference_bias` alone still left some burn. `reference_bias` is the same bias on the
+  reference image and video rows, to make every chunk read its references more, and
+  `reference_audio_bias` (not run on real weights) on the reference audio rows. Stacks with Phrase Attention, whose bias now adds to an
+  existing one instead of standing down. Tests in `tests/test_carry_attention.py`.
+
+### Changed
+
+- **README rewritten.** It now leads with the Looping Sampler and the other headline
+  features, then install, requirements, a workflow table and a one-line index of all
+  67 nodes. The per-node reasoning moved to [`docs/nodes.md`](docs/nodes.md) and the
+  workflow notes to [`docs/workflows.md`](docs/workflows.md), with references to
+  unmerged or draft core PRs removed: everything the pack needs is in current ComfyUI.
+
+### Fixed
+
+- **No more guide-origin warning at startup.** On current core the guide-origin patch
+  installed itself, found it had over-corrected, rolled back and logged a warning on
+  every start. It now tests stock core first and does not install when the guide
+  already lands on the target origin.
 
 ## [Unreleased] — 0.108.1
 

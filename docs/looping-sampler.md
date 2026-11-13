@@ -621,5 +621,5 @@ Everything here is honest about being unknown.
   continuously — see `core-changes.md`. What that looks like is untested.
 - **How many chunks before drift compounds.** Other packs report photocopy-style
   degradation over chained audio; whether the masked carry avoids that is unknown.
-- **Whether guides at interior indices behave** as #15439's author intends — it is a
-  draft PR he has flagged as not fully tested.
+- **Whether guides at interior indices behave** as #15439's author intends. It is
+  merged, but not run here.

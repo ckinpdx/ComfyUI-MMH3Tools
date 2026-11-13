@@ -48,7 +48,8 @@ H3 has no cross-attention: the prompt, the references and the frames sit in one
 sequence. These nodes bias how much of it the model reads.
 
 - **MiniMax H3 Carry Attention** makes each chunk read its carried frames less
-  (`carry_bias`) and its reference images more (`reference_bias`). It is aimed at the
+  (`carry_bias`) and its reference images more (`reference_bias`), and can make the
+  picture read a pinned audio track more (`audio_bias`). It is aimed at the
   over-bake that builds up across chunks. A 173 s static talking head, 27 chunks, held
   with no visible bake or drift at `carry_bias` -1 and `reference_bias` 2 (one run,
   judged by eye). A carry bias of -3 breaks the joins.
@@ -259,7 +260,7 @@ chunk puts them out of step.
   measurement in the docs was made on it.
 - **`carry="keyframe"` has never generated a clip.** Its plumbing is unit-tested only.
 - **Carry Attention and Phrase Attention are experimental**, tested on a handful of
-  clips. `reference_audio_bias` and `value_scale` have not been run on real weights.
+  clips. `reference_audio_bias`, `audio_bias` and `value_scale` have not been run on real weights.
 - **`guide_video` is unit-tested**, not yet run end to end here.
 - Carried references are not seen by the text encoder, so don't use `<Video k>` tags
   for a carried chunk.

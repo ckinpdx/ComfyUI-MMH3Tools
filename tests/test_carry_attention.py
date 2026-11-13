@@ -68,7 +68,7 @@ base = Model()
 check("bias 0 returns the same model", MMH3CarryAttention.execute(base, 0.0).result[0] is base, True)
 
 print("\n3. block selection")
-m = MMH3CarryAttention.execute(Model(), -1.0, "10-20").result[0]
+m = MMH3CarryAttention.execute(Model(), -1.0, blocks="10-20").result[0]
 call(m, carried=2, block=5)
 check("outside the range", seen["mask"], None)
 call(m, carried=2, block=15)
@@ -105,20 +105,20 @@ REF_ROWS = [i for a, b, kind in RLAY.segments if kind == "ref_img" for i in rang
 RVIDEO = next(a for a, b, kind in RLAY.segments if kind == "video")
 def rcall(model, **kw):
     return call(model, rows=RLAY.seq_len, lay=RLAY, **kw)
-m = MMH3CarryAttention.execute(Model(), 0.0, "", 1.5).result[0]
+m = MMH3CarryAttention.execute(Model(), 0.0, 1.5).result[0]
 rcall(m)
 check("both reference images, with no carry published", biased(seen["mask"]), REF_ROWS)
 check("with the reference value", float(seen["mask"][0, REF_ROWS[0]]), 1.5)
 call(m, carried=2)
 check("no references in the layout", seen["mask"], None)
-m = MMH3CarryAttention.execute(Model(), -2.0, "", 1.0).result[0]
+m = MMH3CarryAttention.execute(Model(), -2.0, 1.0).result[0]
 rcall(m, carried=1)
 got = seen["mask"][0].tolist()
 check("both: reference rows", [got[i] for i in REF_ROWS], [1.0] * len(REF_ROWS))
 check("both: carried rows", got[RVIDEO:RVIDEO + 7], [-2.0] * 6 + [0.0])
 rcall(m, carried=0)
 check("both, first chunk: references only", biased(seen["mask"]), REF_ROWS)
-m = MMH3CarryAttention.execute(Model(), 0.0, "10-20", 1.0).result[0]
+m = MMH3CarryAttention.execute(Model(), 0.0, 1.0, blocks="10-20").result[0]
 rcall(m, block=5)
 check("reference bias follows block selection", seen["mask"], None)
 
@@ -129,16 +129,37 @@ ALAY = PackedLayout(12, 6, 4, 6, 10, refs=[
     {"kind": "video_audio", "ref_audio_t": 3, "latent_t": 2, "latent_h": 2, "latent_w": 4}])
 def rows_of(kind):
     return [i for a, b, k in ALAY.segments if k == kind for i in range(a, b)]
-m = MMH3CarryAttention.execute(Model(), 0.0, "", 0.0, 0.75).result[0]
+m = MMH3CarryAttention.execute(Model(), 0.0, 0.0, 0.75).result[0]
 call(m, rows=ALAY.seq_len, lay=ALAY)
 check("the voice reference and the video reference's sound", biased(seen["mask"]), rows_of("ref_audio"))
 check("two audio spans", sum(k == "ref_audio" for _a, _b, k in ALAY.segments), 2)
-m = MMH3CarryAttention.execute(Model(), 0.0, "", 1.0, -0.5).result[0]
+m = MMH3CarryAttention.execute(Model(), 0.0, 1.0, -0.5).result[0]
 call(m, rows=ALAY.seq_len, lay=ALAY)
 got = seen["mask"][0].tolist()
 check("picture and sound take their own values",
       ({got[i] for i in rows_of("ref_img")}, {got[i] for i in rows_of("ref_audio")}), ({1.0}, {-0.5}))
 check("the target audio is left alone", {got[i] for i in rows_of("audio")}, {0.0})
+
+print("\n8. audio_bias lands on the clip's own audio rows, in its own blocks")
+AUDIO = [i for a, b, kind in LAYOUT.segments if kind == "audio" for i in range(a, b)]
+m = MMH3CarryAttention.execute(Model(), 0.0, audio_bias=1.25).result[0]
+call(m)
+check("all the target audio, with no carry published", biased(seen["mask"]), AUDIO)
+check("20 rows: 10 latents, two channels", len(AUDIO), 20)
+check("with the audio value", float(seen["mask"][0, AUDIO[0]]), 1.25)
+call(m, rows=ALAY.seq_len, lay=ALAY)
+check("reference audio is not the clip's audio", biased(seen["mask"]), rows_of("audio"))
+m = MMH3CarryAttention.execute(Model(), -1.0, blocks="30-49", audio_bias=2.0, audio_blocks="0-16").result[0]
+call(m, carried=1, block=5)
+check("audio_blocks only: audio biased, carry not", biased(seen["mask"]), AUDIO)
+call(m, carried=1, block=40)
+check("blocks only: carry biased, audio not", biased(seen["mask"]), list(range(VIDEO, VIDEO + 6)))
+call(m, carried=1, block=20)
+check("in neither range", seen["mask"], None)
+m = MMH3CarryAttention.execute(Model(), -1.0, audio_bias=2.0).result[0]
+call(m, carried=1)
+got = seen["mask"][0].tolist()
+check("both in one block", ({got[i] for i in AUDIO}, got[VIDEO:VIDEO + 7]), ({2.0}, [-1.0] * 6 + [0.0]))
 
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

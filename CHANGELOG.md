@@ -13,6 +13,18 @@ the entry, and migrate any local workflow in the same commit.
 
 ### Added
 
+- **Carry Attention: `audio_bias` and `audio_blocks`.** A bias on the clip's own audio
+  rows, where a track pinned with `use_input_audio` sits, so the picture reads the
+  sound more. It takes its own block range and ignores `blocks`. Default 0, off. Not
+  run on real weights.
+
+- **BREAKING: Carry Attention's inputs are reordered.** `blocks` moved from second to
+  fourth, after the three biases it applies to: `carry_bias`, `reference_bias`,
+  `reference_audio_bias`, `blocks`, `audio_bias`, `audio_blocks`. A workflow saved with
+  0.109.0 loads with `reference_bias`, `reference_audio_bias` and `blocks` in the wrong
+  boxes; re-enter them. Done now, a day after the node shipped, because it only gets
+  more expensive. The shipped example is migrated.
+
 - **Two example workflows**: `MMH3_Looping_CarryAttention` and
   `MMH3_Looping_PhraseAttention`, the same talking-head graph with each node in
   the model chain. Notes in [`docs/workflows.md`](docs/workflows.md).

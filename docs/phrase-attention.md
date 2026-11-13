@@ -73,10 +73,18 @@ also applies to the first chunk and under any sampler.
 **reference_audio_bias** is the same for the reference audio rows: a voice reference,
 and the sound of a video reference, whose picture follows `reference_bias`.
 
+**audio_bias** is on the clip's own audio rows, which is where a track pinned with
+`use_input_audio` sits. Positive makes the picture read the sound more, the aim being
+motion that follows the track more closely. It has its own **audio_blocks** and
+ignores `blocks`, so the sound can be biased in different blocks from the carry and
+references. With audio that is being generated in the same pass, it also changes how
+the audio rows read each other, and so the sound.
+
 - The carry bias is `carry="mask"` only. The sampler publishes how many of each chunk's
   first video latents are carried; a keyframe carry, or any other sampler, gets no
   carry bias.
-- The carry bias is video only. The carried audio rows are not biased.
+- The carry bias is video only. The carried audio rows are biased only by
+  `audio_bias`, along with the rest of the clip's audio.
 - Every row is biased, the carried rows' attention to each other included, not only the
   new frames' attention to them.
 - **173.75 s held** (2026-11-12): a static talking head over supplied audio, 27 chunks
@@ -88,7 +96,8 @@ and the sound of a video reference, whose picture follows `reference_bias`.
 - Mapping the carry bias on 32 s in 5 chunks, same shot: -2 held the joins with a
   slight bake left; -3 and -4 broke them. `reference_bias` alone, with the carry bias
   at 0, still left some burn: both do part of the work.
-- `reference_audio_bias` has not been run on real weights. More attention to a
+- `reference_audio_bias` and `audio_bias` have not been run on real weights. Which
+  blocks carry audio-driven motion is not known. More attention to a
   reference image brings its pose, framing and background along with its look.
 - All references of a kind get the same bias. A larger reference has more rows and
   so already takes more attention at the same value.

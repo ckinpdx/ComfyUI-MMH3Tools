@@ -79,9 +79,15 @@ and the sound of a video reference, whose picture follows `reference_bias`.
 - The carry bias is video only. The carried audio rows are not biased.
 - Every row is biased, the carried rows' attention to each other included, not only the
   new frames' attention to them.
-- One clip on real weights, 32s in 5 chunks without the anti-burn LoRA, all blocks: a
-  bias of -2 held the joins with a slight bake left; -3 and -4 broke them. `reference_bias` alone, with the carry
-  bias at 0, still left some burn: both do part of the work.
+- **173.75 s held** (2026-11-12): a static talking head over supplied audio, 27 chunks
+  of 192 frames with a 39-frame overlap, `carry_bias` -1 and `reference_bias` 2 in all
+  blocks. No visible bake, drift or broken join, judged by eye, on one run. Hybrid
+  fl2va/ref2va checkpoint, 640x640, 12 steps, no anti-burn LoRA, `carry_color_match`
+  off, the reference image also anchored as the first frame. No control at 0 / 0 was
+  rendered at this length. It is the shipped `MMH3_Looping_CarryAttention` workflow.
+- Mapping the carry bias on 32 s in 5 chunks, same shot: -2 held the joins with a
+  slight bake left; -3 and -4 broke them. `reference_bias` alone, with the carry bias
+  at 0, still left some burn: both do part of the work.
 - `reference_audio_bias` has not been run on real weights. More attention to a
   reference image brings its pose, framing and background along with its look.
 - All references of a kind get the same bias. A larger reference has more rows and

@@ -49,9 +49,9 @@ sequence. These nodes bias how much of it the model reads.
 
 - **MiniMax H3 Carry Attention** makes each chunk read its carried frames less
   (`carry_bias`) and its reference images more (`reference_bias`). It is aimed at the
-  over-bake that builds up across chunks. On one 32 s clip, a carry bias of -2 held the
-  joins with a slight bake left, and -3 broke them; the reference bias alone still left
-  some burn.
+  over-bake that builds up across chunks. A 173 s static talking head, 27 chunks, held
+  with no visible bake or drift at `carry_bias` -1 and `reference_bias` 2 (one run,
+  judged by eye). A carry bias of -3 breaks the joins.
 - **MiniMax H3 Phrase Attention** makes the model listen harder to one phrase of the
   prompt, or mute it, with a per-chunk schedule. `value_scale` removes or subtracts
   what the phrase contributes.
@@ -123,7 +123,7 @@ node packs they need, are in [`docs/workflows.md`](docs/workflows.md).
 | `MMH3_Looping_Cinematic` | Text to video film pipeline: definitions, beats and shots written in stages. |
 | `MMH3_Looping_Monologue` | One locked-off talking head. The strictest test of the joins. |
 | `MMH3_LoopingSampler_MusicVideo` | Windows locked to the song, lyrics mapped per window. |
-| `MMH3_Looping_CarryAttention` | Carry Attention on a 32 s talking head: less attention on the carry, more on the reference image. |
+| `MMH3_Looping_CarryAttention` | Carry Attention on a long talking head: less attention on the carry, more on the reference image. |
 | `MMH3_Looping_PhraseAttention` | The same graph with Phrase Attention biasing one phrase of the prompt. |
 | `MMH3_Looping_RefVideo_Chunked` | A reference video cut to each chunk's own span. |
 | `MMH3_Looping_I2V_ControlNet` | Fun ControlNet driving the generate pass. |

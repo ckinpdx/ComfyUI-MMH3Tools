@@ -14,10 +14,15 @@ the entry, and migrate any local workflow in the same commit.
 ### Added
 
 - **Two example workflows**: `MMH3_Looping_CarryAttention` and
-  `MMH3_Looping_PhraseAttention`, the same 32 s talking-head graph with each node in
+  `MMH3_Looping_PhraseAttention`, the same talking-head graph with each node in
   the model chain. Notes in [`docs/workflows.md`](docs/workflows.md).
 
 ### Changed
+
+- **Carry Attention held 173.75 s.** A static talking head over supplied audio, 27
+  chunks of 192 frames with a 39-frame overlap, at `carry_bias` -1 and `reference_bias`
+  2, with no visible bake, drift or broken join (one run, judged by eye, no control at
+  that length). Recorded in [`docs/phrase-attention.md`](docs/phrase-attention.md).
 
 - **`total_frames` can be typed up to 14,405 (600 s)** on Reference (Multi-Prompt),
   Window Plan, Window Context, Split Audio to Windows and Keyframe Planner, matching

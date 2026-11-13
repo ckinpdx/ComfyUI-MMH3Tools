@@ -205,9 +205,11 @@ been run end to end here.
 
 [`workflows/MMH3_Looping_CarryAttention.json`](../workflows/) — the test graph for
 **MiniMax H3 Carry Attention**: a static talking head from one reference image and a
-supplied audio track, 32 s in 5 chunks, `carry="mask"`, no anti-burn LoRA. The node sits
-in the model chain ahead of the guider and scheduler. As saved, `carry_bias` is -1 and
-`reference_bias` is 2. Run it with both at 0 on the same seed for the comparison. See
+supplied audio track, `carry="mask"`, no anti-burn LoRA. The clip's length follows the
+audio: Chunk Schedule takes its total from the loader's duration. The node sits in the
+model chain ahead of the guider and scheduler. As saved, `carry_bias` is -1 and
+`reference_bias` is 2, the settings that held a 173 s track over 27 chunks. Run it with
+both at 0 on the same seed for the comparison. See
 [`phrase-attention.md`](phrase-attention.md#carry-attention).
 
 [`workflows/MMH3_Looping_PhraseAttention.json`](../workflows/) — the same graph with

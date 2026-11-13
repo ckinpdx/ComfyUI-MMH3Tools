@@ -7,7 +7,7 @@ this module packages what the Looping Sampler does **per chunk** into an object 
 its state between calls.
 
 It runs inside an initialised ComfyUI: in the server, or with ComfyUI used as a library
-(the Portravix avatar's face worker does the latter). It does no process setup of its own,
+(the [Portravix](https://github.com/ckinpdx/portravix) avatar's face worker does the latter). It does no process setup of its own,
 and the pack does not import it, so it changes nothing for the nodes.
 
 ## Use

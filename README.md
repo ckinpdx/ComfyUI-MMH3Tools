@@ -83,7 +83,9 @@ a scene planner whose rules follow the song rather than inventing an arc.
 ### Live API
 
 `mmh3tools.live` is a Python API, not a node. It renders a talking head one chunk at a
-time, for callers that receive audio as it is spoken. [`docs/live.md`](docs/live.md).
+time, for callers that receive audio as it is spoken. It is what the face worker of
+the [Portravix](https://github.com/ckinpdx/portravix) avatar runs.
+[`docs/live.md`](docs/live.md).
 
 ## Install
 

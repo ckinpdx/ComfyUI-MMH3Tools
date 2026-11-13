@@ -178,7 +178,7 @@ in [`docs/nodes.md`](docs/nodes.md).
 | MMH3 Embedding Select | Picks an H3 text embedding and the chunks that carry it. |
 | MMH3 Image List | Many reference images as a list, each at its own size. |
 | MiniMax H3 Image to Reference / Latent to Reference / Reference from Latent | Append a still or a latent to the references. |
-| MiniMax H3 Image Keyframe / Latent Keyframe | First or last frame anchor. |
+| MiniMax H3 Image Keyframe / Latent Keyframe | Anchor a frame of the chunk to a still or a latent frame. |
 | MMH3 Official H3 Tokens | Not needed on current ComfyUI; kept so old graphs load. |
 
 **Model**
@@ -262,8 +262,6 @@ chunk puts them out of step.
 - Carried references are not seen by the text encoder, so don't use `<Video k>` tags
   for a carried chunk.
 - Join audio in the waveform after decoding, never in latent space.
-- The Image and Latent Keyframe nodes accept the first or last frame only. For anchors
-  inside the clip, use the sampler's `keyframe_indices`.
 
 ## Companion packs
 

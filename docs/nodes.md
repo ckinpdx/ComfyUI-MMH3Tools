@@ -47,7 +47,7 @@ for any node is in its tooltip.
 - **MiniMax H3 Latent Keyframe** — first/last frame anchor from a latent frame.
   Shares the *target* spatial grid, so the source must match generation
   dimensions exactly.
-- **MiniMax H3 Image Keyframe** — the same anchor from a **still image**.
+- **MiniMax H3 Image Keyframe** — an anchor from a **still image**, at any frame.
   Resizes and encodes internally, precisely because keyframe rows cannot be
   downscaled; a still encoded at the wrong size fails deep in the model with an
   unhelpful broadcast error. Both keyframe nodes *append*, filling a gap in
@@ -55,9 +55,9 @@ for any node is in its tooltip.
 
   Keyframes and references coexist: core concatenates them.
 
-  `frame_index` accepts `0` or `-1` only on these two nodes. For anchors inside the
-  clip, use the **Looping Sampler**'s `keyframe_indices`, or core's **Add Guide for
-  MiniMax H3**.
+  Image Keyframe's `frame_index` is any frame of the chunk; negatives count from the
+  end, so `-1` is the last. Latent Keyframe is first or last only. In a chained run,
+  use the **Looping Sampler**'s `keyframe_indices` instead.
 
 ### Sequences
 - **MiniMax H3 Reference (Multi-Prompt)** + **MMH3 Cond Select** — the stock

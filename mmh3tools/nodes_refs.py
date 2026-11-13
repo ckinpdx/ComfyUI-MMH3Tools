@@ -366,15 +366,9 @@ class MMH3ImageToRef(io.ComfyNode):
 class MMH3ImageKeyframe(io.ComfyNode):
     """Inject a still image as a keyframe anchor, appending to existing conditioning.
 
-    Fills the gap in the stock nodes: MiniMaxH3ReferenceToVideo has no keyframe
-    inputs at all, so ref2va conditioning cannot carry a frame anchor. This appends
-    to minimax_keyframes.
-
-    But NOT alongside references on stock ComfyUI: `extra_conds` assigns
-    `cond_video_latents` from keyframes and then assigns it again from references, so
-    the references win and every keyframe is silently dropped. Composing the two needs
-    that assignment to accumulate, which is a core edit -- see the keyframe-anchors
-    branch. Here, use it on conditioning that carries no references.
+    Appends to minimax_keyframes, so it composes with conditioning that already
+    carries references or other keyframes. It needs no latent, where core's
+    MiniMaxH3AddGuide does.
 
     Resizing and encoding happen here because keyframe rows share the TARGET spatial
     grid and cannot be downscaled -- a still at any other resolution fails deep in
@@ -382,8 +376,7 @@ class MMH3ImageKeyframe(io.ComfyNode):
 
     Does NOT register the image with the tokenizer, so <Picture N> will not resolve
     in prompt text. Use the stock MiniMaxH3ImageToVideo first_frame/last_frame inputs
-    if you need the label; use this when you need a frame anchor alongside references,
-    or at an index the stock nodes cannot express.
+    if you need the label.
     """
 
     @classmethod
@@ -393,8 +386,8 @@ class MMH3ImageKeyframe(io.ComfyNode):
             display_name="MiniMax H3 Image Keyframe",
             category="MMH3Tools/reference",
             description=(
-                "Append a still image as a keyframe anchor. Resizes and encodes to the "
-                "target grid internally. Composes with ref2va conditioning."
+                "Append a still image as a keyframe anchor at any frame of the chunk. "
+                "Resizes and encodes to the target grid internally."
             ),
             inputs=[
                 io.Conditioning.Input("conditioning"),
@@ -410,13 +403,9 @@ class MMH3ImageKeyframe(io.ComfyNode):
                             "Calculator - a 'last' anchor lands wrong if this disagrees.",
                 ),
                 io.Int.Input(
-                    "frame_index", default=0, min=-1, max=3600, step=1,
-                    tooltip="0 = first frame. -1 = last frame. Nothing else: stock "
-                            "PackedLayout raises 'only first/last keyframe anchors are "
-                            "supported' and this node refuses rather than failing deeper in. "
-                            "MiniMax's own guide does list interior anchors as valid, and "
-                            "they work -- on the keyframe-anchors branch, which patches "
-                            "PackedLayout at runtime.",
+                    "frame_index", default=0, min=-3600, max=3600, step=1,
+                    tooltip="Frame of the chunk to anchor. 0 is the first frame; negatives "
+                            "count from the end, so -1 is the last.",
                 ),
                 io.Combo.Input(
                     "resize", options=["auto", "stretch", "center crop"], default="auto",
@@ -439,16 +428,10 @@ class MMH3ImageKeyframe(io.ComfyNode):
             logging.info("[MMH3ImageKeyframe] %d images given; using the first",
                          int(image.shape[0]))
 
-        index = int(target_frame_count) - 1 if frame_index == -1 else int(frame_index)
-        if index != 0 and index != int(target_frame_count) - 1:
-            # Refuse rather than warn. Stock PackedLayout raises on interior anchors, so
-            # warning here only moved the failure deeper for no gain. Unlocking it means
-            # patching core, which lives on the branch.
-            raise ValueError(
-                "frame_index %d is an INTERIOR anchor, and stock PackedLayout raises "
-                "'only first/last keyframe anchors are supported'. Use 0 or -1 here. "
-                "Interior anchors are on the keyframe-anchors branch, which patches "
-                "PackedLayout at runtime." % index)
+        index = frame_index if frame_index >= 0 else target_frame_count + frame_index
+        if not 0 <= index < target_frame_count:
+            raise ValueError("frame_index %d is outside the chunk's %d frames"
+                             % (frame_index, target_frame_count))
 
         crop = {"stretch": "disabled", "center crop": "center"}.get(
             resize, "disabled" if index == 0 else "center")
@@ -471,14 +454,8 @@ class MMH3ImageKeyframe(io.ComfyNode):
 class MMH3LatentKeyframe(io.ComfyNode):
     """Hard first/last frame anchor built from a latent frame.
 
-    KEYFRAMES AND REFERENCES DO NOT COEXIST ON STOCK COMFYUI. `extra_conds` assigns
-    `cond_video_latents` from keyframes and then ASSIGNS IT AGAIN from references, so
-    any reference silently erases every keyframe and the layout's cond rows outnumber
-    the latents feeding them. Use this on conditioning that carries no references, or
-    take the keyframe-anchors branch, where the accumulate fix is applied.
-
-    Whether the ref2va checkpoint responds to 'cond' rows is the open experiment --
-    fl2va definitely does.
+    Appends to minimax_keyframes, so it composes with conditioning that already
+    carries references or other keyframes.
     """
 
     @classmethod
@@ -490,7 +467,7 @@ class MMH3LatentKeyframe(io.ComfyNode):
             description=(
                 "Anchor the first or last frame using one latent frame from another AV "
                 "latent. Keyframe rows share the TARGET spatial grid, so the source must "
-                "match the generation's width/height exactly. Only first/last are supported."
+                "match the generation's width/height exactly."
             ),
             inputs=[
                 io.Conditioning.Input("conditioning"),

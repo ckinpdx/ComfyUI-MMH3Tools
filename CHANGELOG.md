@@ -9,6 +9,16 @@ Never insert or reorder existing inputs, or saved workflows silently rebind to t
 wrong widgets. A node that has not shipped may still be reordered freely — say so in
 the entry, and migrate any local workflow in the same commit.
 
+## [Unreleased]
+
+### Changed
+
+- **MiniMax H3 Image Keyframe takes any frame.** It refused everything but the first
+  and last frame, with an error pointing at a branch, from when core could not place
+  interior anchors. `frame_index` is now any frame of the chunk, and negatives count
+  from the end. The out-of-date notes saying keyframes and references cannot coexist
+  are gone from both keyframe nodes. `tests/test_keyframe_nodes.py`.
+
 ## 0.109.0 — Phrase and Carry Attention, README rewrite
 
 ### Added

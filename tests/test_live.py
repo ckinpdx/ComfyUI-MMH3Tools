@@ -58,11 +58,14 @@ class FakeNoise:
 SEEN = []          # (video latent, video mask, audio latent, audio mask, noise seed) per window
 OUT = []           # what each fake sampling returned (video)
 POSITIVE = []      # the conditioning each window's guider was given
+PUBLISHED = []     # the transformer_options each window's guider carried
+MODELS = []        # the model each session built its sampling from
 def fake_run_sampling(noise, guider, sampler, sigmas, latent, start, end):
     v, a = unpack_av(latent, "window")
     vm, am = latent["noise_mask"].unbind()
     SEEN.append((v.clone(), vm.clone(), a.clone(), am.clone(), noise.seed))
     POSITIVE.append(guider.original_conds["positive"])
+    PUBLISHED.append(guider.model_options["transformer_options"])
     out = torch.randn(v.shape, generator=torch.Generator().manual_seed(len(SEEN))) * (1 + len(SEEN))
     OUT.append(out)
     return {"samples": __import__("comfy.nested_tensor", fromlist=["NestedTensor"]).NestedTensor([out, a])}
@@ -86,16 +89,19 @@ class FakeVae:
         return idx.expand(1, frames, 32, 32, 3).clone()
 
 
-LIVE._make_sampling = lambda model, cond, config: (FakeGuider(), "S", torch.linspace(1, 0, 3), FakeNoise())
+def fake_make_sampling(model, cond, config):
+    MODELS.append(model)
+    return FakeGuider(), "S", torch.linspace(1, 0, 3), FakeNoise()
+LIVE._make_sampling = fake_make_sampling
 LIVE._run_sampling = fake_run_sampling
 LIVE._encode_audio = fake_encode
 
 
-def session(**kw):
-    SEEN.clear(); OUT.clear(); AUDIO_CALLS.clear(); POSITIVE.clear()
+def session(model="MODEL", **kw):
+    SEEN.clear(); OUT.clear(); AUDIO_CALLS.clear(); POSITIVE.clear(); PUBLISHED.clear(); MODELS.clear()
     vae = FakeVae()
     cfg = LIVE.LiveConfig(size=512, window_frames=56, **kw)
-    return LIVE.LiveH3("MODEL", vae, "AVAE", [[torch.zeros(1, 8), {}]], {}, cfg), vae, cfg
+    return LIVE.LiveH3(model, vae, "AVAE", [[torch.zeros(1, 8), {}]], {}, cfg), vae, cfg
 
 
 print("\n2. the first window: nothing carried, speech pinned")
@@ -155,6 +161,35 @@ for bad, prompts in (("a '|' in a prompt", ["one | two"]), ("an empty prompt", [
         check("build_conditionings refuses " + bad, "no error", "ValueError")
     except ValueError:
         check("build_conditionings refuses " + bad, True, True)
+
+print("\n7. attention biases")
+class Model:
+    def __init__(self, options=None):
+        self.model_options = options or {}
+    def clone(self):
+        return Model({k: dict(v) for k, v in self.model_options.items()})
+base = Model()
+live, vae, cfg = session(base)
+check("off by default: the model is used as given", MODELS[0] is base, True)
+live.render(chunk); live.render(chunk); live.render(chunk)
+check("each window publishes its index", [p["mmh3_chunk_index"] for p in PUBLISHED], [0, 1, 2])
+check("...and how many latents it carries", [p["mmh3_carried_latents"] for p in PUBLISHED], [0, 2, 2])
+live, vae, cfg = session(base, reference_bias=2.0, carry_bias=-1.0)
+check("a bias patches a clone", MODELS[0] is not base and "optimized_attention_override"
+      in MODELS[0].model_options["transformer_options"], True)
+check("the given model is left alone", base.model_options, {})
+from comfy.ldm.minimax.model import PackedLayout
+lay = PackedLayout(12, 6, 4, 6, 10, refs=[{"kind": "image", "latent_h": 4, "latent_w": 6}])
+got = {}
+def backend(q, k, v, heads, mask=None, skip_reshape=False, **kw):
+    got["mask"] = mask
+k = torch.zeros(1, 2, lay.seq_len, 4)
+MODELS[0].model_options["transformer_options"]["optimized_attention_override"](
+    backend, k, k, k, 2, skip_reshape=True,
+    transformer_options={"minimax_h3_layout": lay, "block_index": 0, "mmh3_carried_latents": 2})
+by_kind = {kind: float(got["mask"][0, a]) for a, b, kind in lay.segments}
+check("both biases land on their rows", (by_kind["ref_img"], by_kind["video"], by_kind["audio"], by_kind["text"]),
+      (2.0, -1.0, 0.0, 0.0))
 
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

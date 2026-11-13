@@ -13,17 +13,26 @@ the entry, and migrate any local workflow in the same commit.
 
 ### Added
 
-- **Carry Attention: `audio_bias` and `audio_blocks`.** A bias on the clip's own audio
-  rows, where a track pinned with `use_input_audio` sits, so the picture reads the
-  sound more. It takes its own block range and ignores `blocks`. Default 0, off. Not
-  run on real weights.
+- **`mmh3tools.live`: attention biases.** `LiveConfig` gains `carry_bias`
+  and `reference_bias`, both off by default; a session with either set runs
+  its model through Carry Attention. Each window now publishes its index and its
+  carried latents to the model. Tests only: not run live, and its cost per forward is
+  not measured. [`docs/live.md`](docs/live.md).
 
 - **BREAKING: Carry Attention's inputs are reordered.** `blocks` moved from second to
   fourth, after the three biases it applies to: `carry_bias`, `reference_bias`,
-  `reference_audio_bias`, `blocks`, `audio_bias`, `audio_blocks`. A workflow saved with
+  `reference_audio_bias`, `blocks`. A workflow saved with
   0.109.0 loads with `reference_bias`, `reference_audio_bias` and `blocks` in the wrong
   boxes; re-enter them. Done now, a day after the node shipped, because it only gets
   more expensive. The shipped example is migrated.
+
+- **Carry Attention: `audio_bias` and `audio_blocks` removed.** They were on main for
+  a few hours on 2026-11-12, never in a numbered version. A bias on the clip's own
+  audio rows only dampened the sound's effect on the picture; positive values did
+  nothing until the image degraded above 5, and no block range helped. A value scale
+  on the same rows did nothing good either and was never pushed. They were the last
+  two inputs, so removing them moves nothing. Noted in
+  [`docs/phrase-attention.md`](docs/phrase-attention.md) so it is not rebuilt.
 
 - **Two example workflows**: `MMH3_Looping_CarryAttention` and
   `MMH3_Looping_PhraseAttention`, the same talking-head graph with each node in

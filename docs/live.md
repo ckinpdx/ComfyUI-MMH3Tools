@@ -89,6 +89,20 @@ alone holds colour but not identity or detail; 0.6 alone holds the face but stil
 both together held all three for 20 s, and the latent match costs nothing measurable. See
 [`looping-sampler.md`](looping-sampler.md), §10 Observed.
 
+## Attention biases (untested live)
+
+`LiveConfig` takes `carry_bias` and `reference_bias`, both 0 (off) by
+default. Either one set runs the model through **MiniMax H3 Carry Attention** when the
+session is created, in all blocks: `reference_bias` above 0 makes every window read the
+face reference more, and `carry_bias` below 0 makes a window read its 2 carried latents less. See
+[`phrase-attention.md`](phrase-attention.md#carry-attention).
+
+On a 173 s graph render, `carry_bias` -1 with `reference_bias` 2 held a static talking
+head with no visible bake or drift. That was 12 steps on another checkpoint with a
+12-latent carry at full strength. None of these has been run live: whether a 2-step
+model responds the same way, and what the bias costs per forward, are both unmeasured.
+The speed table below is without them.
+
 ## Speed (RTX 5090, 512x512, 2 steps, euler/simple)
 
 | window | per chunk | of which | vs real time |

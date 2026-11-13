@@ -35,6 +35,7 @@ from comfy.nested_tensor import NestedTensor
 
 from .color_carry import decode_frames, latent_anchor_stats, match_carry_latent
 from .common import FPS, LATENTS_PER_GROUP, frames_to_audio_t, pack_av, unpack_av
+from .nodes_carry_attention import MMH3CarryAttention
 from .nodes_looping_sampler import _chunk_guider, _chunk_noise, _run_sampling, _strip_guide_keys
 
 CARRY_LATENTS, CARRY_FRAMES = 2, 5   # the smallest carry on H3's grid: one 1-frame token + one 4-frame token
@@ -52,6 +53,8 @@ class LiveConfig:
     seed: int = 0
     audio_rate: int = 48000           # input rate; core resamples to the audio VAE's 32 kHz
     audio_context_s: float = 1.0      # left context for the audio encoder
+    carry_bias: float = 0.0           # MMH3CarryAttention, all blocks; 0 is off. Negative: read the carry less
+    reference_bias: float = 0.0       # positive: read the face reference more
 
     def __post_init__(self):
         if self.size % 32:
@@ -143,6 +146,9 @@ class LiveH3:
     def __init__(self, model, vae, audio_vae, cond, template, config=None):
         self.config = config or LiveConfig()
         self.vae, self.audio_vae, self.cond, self.template = vae, audio_vae, cond, template
+        c = self.config
+        if c.carry_bias or c.reference_bias:
+            model = MMH3CarryAttention.execute(model, c.carry_bias, c.reference_bias).result[0]
         self.guider, self.sampler, self.sigmas, self.noise = _make_sampling(model, cond, self.config)
         self.fps = FPS
         self.frames_per_chunk = self.config.new_frames
@@ -183,7 +189,8 @@ class LiveH3:
         am = torch.zeros([1, 1, a.shape[2], a.shape[3]])                                # the speech is pinned
         latent = pack_av(self.template, v, a, noise_mask=NestedTensor([vm, am]))
         done = _run_sampling(_chunk_noise(self.noise, self.index),
-                             _chunk_guider(self.guider, self.cond if cond is None else cond),
+                             _chunk_guider(self.guider, self.cond if cond is None else cond, chunk=self.index,
+                                           carried=CARRY_LATENTS if self.carry is not None else 0),
                              self.sampler, self.sigmas, latent, 0, 1000)
         dv, _da = unpack_av(done, "live window")
         dv = dv.float().cpu()

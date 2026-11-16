@@ -140,5 +140,59 @@ check("picture and sound take their own values",
       ({got[i] for i in rows_of("ref_img")}, {got[i] for i in rows_of("ref_audio")}), ({1.0}, {-0.5}))
 check("the target audio is left alone", {got[i] for i in rows_of("audio")}, {0.0})
 
+print("\n8. start_percent / end_percent limit the biases to part of sampling")
+class Sampling:
+    def percent_to_sigma(self, percent):       # H3 is a flow model: 1 at the start, 0 at the end
+        return 1.0 - percent
+class SampledModel(Model):
+    def get_model_object(self, name):
+        return {"model_sampling": Sampling()}[name]
+    def clone(self):
+        return SampledModel({k: dict(v) for k, v in self.model_options.items()})
+def at(model, sigma):
+    seen.clear()
+    k = torch.zeros(1, 2, RLAY.seq_len, 4)
+    over = model.model_options["transformer_options"]["optimized_attention_override"]
+    over(backend, k, k, k, 2, skip_reshape=True, transformer_options={
+        "block_index": 0, "minimax_h3_layout": RLAY, "sigmas": torch.tensor([sigma, sigma])})
+    return seen["mask"] is not None
+m = MMH3CarryAttention.execute(SampledModel(), 0.0, 2.0, start_percent=0.25, end_percent=0.75).result[0]
+check("before the range", at(m, 0.9), False)
+check("at its start", at(m, 0.75), True)
+check("inside it", at(m, 0.5), True)
+check("at its end", at(m, 0.25), True)
+check("after the range", at(m, 0.1), False)
+m = MMH3CarryAttention.execute(SampledModel(), 0.0, 2.0, start_percent=0.4).result[0]
+check("late only: off at the first step", at(m, 1.0), False)
+check("late only: on to the last", at(m, 0.0), True)
+m = MMH3CarryAttention.execute(Model(), 0.0, 2.0).result[0]
+call(m, rows=RLAY.seq_len, lay=RLAY)
+check("the full range never asks for the sigma or the model's sampling", seen["mask"] is not None, True)
+
+print("\n9. guide_bias and guide_audio_bias land on the guide rows")
+GLAY = PackedLayout(12, 6, 4, 6, 10, keyframes=[
+    {"resolved_frame_index": 0, "latent": torch.zeros([1, 24, 2, 4, 6])},
+    {"resolved_frame_index": 0, "audio_latent": torch.zeros([1, 32, 2, 5])}],
+    refs=[{"kind": "image", "latent_h": 4, "latent_w": 6}, {"kind": "audio", "ref_audio_t": 3}])
+def grows(kind):
+    return [i for a, b, k in GLAY.segments if k == kind for i in range(a, b)]
+check("the layout holds both guide kinds", (len(grows("cond")), len(grows("cond_audio"))), (12, 10))
+m = MMH3CarryAttention.execute(Model(), 0.0, guide_bias=1.25).result[0]
+call(m, rows=GLAY.seq_len, lay=GLAY)
+check("guide_bias: the guide picture rows only", biased(seen["mask"]), grows("cond"))
+m = MMH3CarryAttention.execute(Model(), 0.0, guide_audio_bias=0.5).result[0]
+call(m, rows=GLAY.seq_len, lay=GLAY)
+check("guide_audio_bias: the guide audio rows only", biased(seen["mask"]), grows("cond_audio"))
+m = MMH3CarryAttention.execute(Model(), 0.0, 1.0, -0.5, guide_bias=2.0, guide_audio_bias=3.0).result[0]
+call(m, rows=GLAY.seq_len, lay=GLAY)
+got = seen["mask"][0].tolist()
+check("guides and references take their own values",
+      [{got[i] for i in grows(k)} for k in ("ref_img", "ref_audio", "cond", "cond_audio")],
+      [{1.0}, {-0.5}, {2.0}, {3.0}])
+check("the target audio and video are left alone",
+      {got[i] for k in ("audio", "video") for i in grows(k)}, {0.0})
+call(m, carried=2)
+check("no guides or references in the layout: carry only", seen["mask"], None)
+
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

@@ -73,6 +73,23 @@ also applies to the first chunk and under any sampler.
 **reference_audio_bias** is the same for the reference audio rows: a voice reference,
 and the sound of a video reference, whose picture follows `reference_bias`.
 
+**guide_bias** and **guide_audio_bias** are the same for the guide rows. A guide sits on
+the clip's own timeline, where a reference sits before it: `guide_bias` is the picture
+rows of the Looping Sampler's `guide_video` and `keyframes`, a `carry="keyframe"` tail
+and core's Add Guide; `guide_audio_bias` is the sampler's `guide_audio` and the sound
+of a `carry="keyframe"` tail. They are the last two inputs, after `end_percent`. Not
+run on real weights; the Attention Share Probe reports the two as `cond` and
+`cond_audio`.
+
+**start_percent** and **end_percent** limit all the biases to part of sampling, in the
+same terms as core's ConditioningSetTimestepRange: 0 is the first step and 1 the last.
+On a simple schedule a percent is close to that fraction of the steps; other schedulers
+bend it, and the node logs the sigma range it resolved to. They are for shots with
+movement, where a reference biased through every step pulls the picture back to the
+reference's pose: starting the bias later leaves the early steps, which lay out
+motion and composition, alone. For a different range per bias, chain two nodes; their
+biases add. Not run on real weights.
+
 - The carry bias is `carry="mask"` only. The sampler publishes how many of each chunk's
   first video latents are carried; a keyframe carry, or any other sampler, gets no
   carry bias.
@@ -88,6 +105,9 @@ and the sound of a video reference, whose picture follows `reference_bias`.
 - Mapping the carry bias on 32 s in 5 chunks, same shot: -2 held the joins with a
   slight bake left; -3 and -4 broke them. `reference_bias` alone, with the carry bias
   at 0, still left some burn: both do part of the work.
+- **Static shots only, as tested.** At `carry_bias` -1 and `reference_bias` 2 through
+  every step, a shot with movement is pulled back toward the reference image
+  (2026-11-13). `start_percent` is the first thing to try for that.
 - **The clip's own audio is not biased, on purpose.** A bias and a value scale on the
   target audio rows were built and tested on a static talking head over a pinned
   track (2026-11-12), hoping for a more audio-reactive picture. The bias only
@@ -97,6 +117,35 @@ and the sound of a video reference, whose picture follows `reference_bias`.
   reference image brings its pose, framing and background along with its look.
 - All references of a kind get the same bias. A larger reference has more rows and
   so already takes more attention at the same value.
+
+## Attention Share Probe
+
+**MiniMax H3 Attention Share Probe** measures what Carry Attention acts on. Wire the
+model through it anywhere in the chain, and the Looping Sampler adds a line under each
+chunk of its report, and to the console as the chunk finishes (the figures here are
+made up to show the format):
+
+      chunk 3: prompt 0, frames 459-650, 39 carried
+        attention from the new frames: text 3.1% (x0.9), ref_img 12.0% (x3.0), audio 5.5% (x1.4), carry 31.2% (x2.1), video 48.2% (x0.7)
+
+Each figure is the share of their attention the chunk's new video rows give that part
+of the sequence, and in brackets how many times what its row count alone would get.
+`carry` is the carried rows and `video` the new ones; the rest are the layout's own
+names (`cond` is a keyframe). It changes nothing in the picture.
+
+- It is the softmax itself, not an estimate: H3 hands the attention function its
+  queries and keys already normed and rotated. 64 of the new rows are read per call,
+  averaged over heads, the measured blocks, the steps and the positive pass.
+- It reads the mask the backend gets, so the biases of Carry Attention and Phrase
+  Attention are in the figures whichever side of them it is wired.
+- **blocks** limits it to some blocks, e.g. `0-19`; empty is all 50 as one average.
+- Looping Sampler only. Sparse or window attention never makes a dense call, and the
+  line says `not measured`.
+- A share is where the rows looked, not what the picture took.
+- Covered by `tests/test_attention_share.py` against a full softmax. Not run on real
+  weights: its cost per step is unmeasured, and whether the carry share tracks bake at
+  all is the open question it is for. The run to make is the same clip at 0 / 0 and at
+  `carry_bias` -1, `reference_bias` 2.
 
 ## Limits
 

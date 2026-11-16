@@ -664,6 +664,17 @@ a choice here — now lives in
   `carry="mask"`. Unit-tested against a stubbed sampler
   (`tests/test_guide_video.py`); not yet run on a real render.
 
+  **`guide_audio`** is the same for sound: an AUDIO input on the clip's clock, encoded
+  once with **`audio_vae`** (the H3 audio vae, the socket below it). Each chunk takes
+  its own span as an audio guide anchored at its frame 0. A guide is read, never
+  generated, so it does not replace the clip's audio; wiring the track that
+  `use_input_audio` pinned shows the model it twice, as the target and as a guide, and
+  **Carry Attention**'s `guide_audio_bias` acts on the guide copy. Mono is duplicated
+  to stereo and the track is trimmed to the clip before encoding. Needs no video
+  `vae`. Refuses `carry="keyframe"`, which already
+  guides each chunk with the carried sound. Experimental: the base model is not
+  trained on audio guides, and it has not been run on real weights.
+
   **`carry_color_match`** (0.106.0) is SoulX-FlashHead's anti-drift step, applied to
   the carry. A long chain "cooks": each chunk inherits the last one's colour error
   through the carried latents and adds its own. With `first_chunk`, chunk 1's
@@ -1112,7 +1123,7 @@ the result is usable.
   per chunk. `value_scale` removes or subtracts the phrase's content. See [`phrase-attention.md`](phrase-attention.md).
 - **MiniMax H3 Carry Attention** — experimental. The same bias on the frames a Looping
   Sampler chunk carries from the previous one (`carry="mask"`): negative makes the chunk
-  read its carry less. `reference_bias` and `reference_audio_bias` do the same for the references. See [`phrase-attention.md`](phrase-attention.md#carry-attention).
+  read its carry less. `reference_bias` and `reference_audio_bias` do the same for the references, `guide_bias` and `guide_audio_bias` for the guides. See [`phrase-attention.md`](phrase-attention.md#carry-attention).
 - **MMH3 AdaLN Reference Patch** — take AdaLN modulation from another H3 checkpoint,
   per block. `fl2va` and `ref2va` are the same model *except* for AdaLN: attention,
   MLP, `condition_proj`, the patch projections and the output heads all measure at

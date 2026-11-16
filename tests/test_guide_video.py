@@ -64,6 +64,14 @@ class FakeVae:
         return torch.zeros([1, 24, frames_to_latents(n) if n >= 5 else 1, H, W])
 
 
+PER_LATENT = 32000 // 40
+class FakeAudioVae:
+    """One latent per 800 samples at 32 kHz, holding that span's first sample."""
+    def encode(self, wave):                      # [1, L, 2]
+        n = wave.shape[1] // PER_LATENT
+        return wave[0, :n * PER_LATENT:PER_LATENT, 0].reshape(1, 1, 1, n).expand(1, 32, 2, n).clone()
+
+
 SEEN = []
 class FakeSampler:
     def sample(self, noise, guider, sampler, sigmas, latent):
@@ -76,7 +84,7 @@ TOTAL, CHUNK, OV = 481, 124, 22
 
 
 def run(total=TOTAL, chunk=CHUNK, ov=OV, guide=None, carry="mask", kf=None, kf_idx="",
-        vae="new", prompt_extra=None):
+        vae="new", prompt_extra=None, guide_audio=None, audio_vae="new"):
     SEEN.clear()
     vae = FakeVae() if vae == "new" else vae
     n = len(_plan(total, chunk if chunk > 0 else total, ov, "standard_static")[4])
@@ -84,7 +92,9 @@ def run(total=TOTAL, chunk=CHUNK, ov=OV, guide=None, carry="mask", kf=None, kf_i
     cs = [[[torch.zeros([1, 8]), dict({"tag": "p%d" % i}, **extra)]] for i in range(n)]
     out = LS.MMH3LoopingSampler.execute(
         FakeNoise(), FakeGuider(), "S", SIGMAS, {"conds": cs}, clip(total), chunk, ov, carry,
-        1.0, 1.0, 0, 1000, 0, None, None, kf, kf_idx, vae, guide_video=guide).result
+        1.0, 1.0, 0, 1000, 0, None, None, kf, kf_idx, vae, guide_video=guide,
+        guide_audio=guide_audio,
+        audio_vae=FakeAudioVae() if audio_vae == "new" else audio_vae).result
     return out, vae
 
 
@@ -156,6 +166,52 @@ for label, kw, err in (
 print("\n8. the clip-length cut matches core's Add Guide")
 check("cuts", [LS._guide_clip_frames(k) for k in (0, 4, 5, 21, 22, 38, 39, 124)],
       [0, 0, 5, 5, 22, 22, 39, 124])
+
+print("\n9. guide_audio: every chunk is guided by the audio span IT renders")
+TOTAL_A = int(clip(TOTAL)["samples"].unbind()[1].shape[-1])
+def track(n, channels=2):
+    """n latents of audio; the samples of latent j hold the value j."""
+    wave = torch.arange(n, dtype=torch.float32).repeat_interleave(PER_LATENT)
+    return {"waveform": wave.reshape(1, 1, -1).expand(1, channels, -1).clone(), "sample_rate": 32000}
+def audio_guides(g):
+    return [k for k in guides(g) if "audio_latent" in k]
+(out, n9, rep9), vae9 = run(guide_audio=track(TOTAL_A), vae=None)
+a_spans = [(LS._audio_index_at(w.index_list[0], frames_to_latents(TOTAL), TOTAL_A),
+            LS._audio_index_at(min(w.index_list[-1] + 1, frames_to_latents(TOTAL)),
+                               frames_to_latents(TOTAL), TOTAL_A))
+           for w in _plan(TOTAL, CHUNK, OV, "standard_static")[4]]
+check("one audio guide per chunk, and no vae needed", [len(guides(g)) for g in SEEN], [1] * n9)
+check("anchored at the chunk's frame 0",
+      {k["resolved_frame_index"] for g in SEEN for k in guides(g)}, {0})
+check("no picture on it", any("latent" in k for g in SEEN for k in guides(g)), False)
+check("each starts on its chunk's first audio latent",
+      [float(guides(g)[0]["audio_latent"][0, 0, 0, 0]) for g in SEEN], [float(a) for a, _b in a_spans])
+check("...and covers the chunk's audio exactly",
+      [int(guides(g)[0]["audio_latent"].shape[-1]) for g in SEEN], [b - a for a, b in a_spans])
+check("the report names each chunk's guide audio", rep9.count(", guide audio"), n9)
+
+print("\n10. guide_audio beside guide_video, from a longer mono track")
+(out, n10, rep10), vae10 = run(guide=source(TOTAL), guide_audio=track(TOTAL_A + 200, channels=1))
+check("a picture guide and an audio guide per chunk",
+      [(sum("latent" in k for k in guides(g)), len(audio_guides(g))) for g in SEEN], [(1, 1)] * n10)
+check("still sliced on the clip's clock",
+      [float(audio_guides(g)[0]["audio_latent"][0, 0, 0, 0]) for g in SEEN],
+      [float(a) for a, _b in a_spans])
+
+print("\n11. a SHORT guide_audio, and what is refused")
+short_a = a_spans[2][0] + 7
+(out, n11, rep11), _v = run(guide_audio=track(short_a), vae=None)
+check("chunk 2 gets what is left", int(guides(SEEN[2])[0]["audio_latent"].shape[-1]), 7)
+check("chunks past the end get none", [len(guides(g)) for g in SEEN[3:]], [0] * (n11 - 3))
+check("reported", ("it runs out" in rep11, "no guide audio (it ended)" in rep11), (True, True))
+for label, kw, err in (
+        ("with carry='keyframe'", dict(guide_audio=track(TOTAL_A), carry="keyframe"), "carry='keyframe'"),
+        ("no audio vae", dict(guide_audio=track(TOTAL_A), audio_vae=None), "audio vae")):
+    try:
+        run(**kw)
+        check("refused: " + label, "no error", err)
+    except (ValueError, RuntimeError) as e:
+        check("refused: " + label, err in str(e), True)
 
 print("\n" + ("ALL PASS" if not fails else "FAILURES: %s" % fails))
 sys.exit(1 if fails else 0)

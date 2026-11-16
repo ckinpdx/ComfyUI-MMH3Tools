@@ -16,6 +16,7 @@ import torch
 from comfy.nested_tensor import NestedTensor
 
 from mmh3tools import nodes_looping_sampler as LS
+from mmh3tools.nodes_attention_share import AttentionShare
 from mmh3tools.nodes_windows import MMH3WindowPlan as PLAN, _plan, _window_frame_spans
 from mmh3tools.common import latents_to_frames, frames_to_audio_t, frames_to_latents
 
@@ -99,10 +100,10 @@ SIGMAS = torch.linspace(1.0, 0.0, 13)     # 12 steps
 
 def run(total=TOTAL, chunk=CHUNK, ov=OV, prompts=None, carry="mask",
         latent=None, kf=None, kf_idx="", vae=None, sigmas=SIGMAS,
-        start=0, end=1000, p2_start=0, p2_sampler=None, p2_guider=None):
+        start=0, end=1000, p2_start=0, p2_sampler=None, p2_guider=None, guider=None):
     for k in SEEN:
         SEEN[k].clear()
-    g = FakeGuider()
+    g = guider or FakeGuider()
     n_expect = len(_plan(total, chunk, ov, "standard_static")[4])
     cs = [cond("p%d" % i) for i in range(prompts if prompts is not None else n_expect)]
     out = LS.MMH3LoopingSampler.execute(
@@ -363,6 +364,21 @@ v2, _a2 = out2["samples"].unbind()
 stamps = sorted({float(x) for x in v2[0, 0, :, 0, 0].unique()})
 check("every chunk is still visible in the master", len(stamps), n2)
 check("the report names the clamped tail", "clamped tail" in rep2, True)
+
+print("\n17. an attention share probe on the model is reset and reported per chunk")
+probe = AttentionShare()
+probe.calls, probe.share, probe.rows = 3, {"carry": 1.5}, {"carry": 10}   # an earlier run's
+pg = FakeGuider()
+pg.model_options = {"transformer_options": {"mmh3_attention_share": probe}}
+(out, n, rep), _ = run(guider=pg)
+rep_lines = rep.splitlines()
+check("one line per chunk, none of it the earlier run's",
+      sum(l == "    attention: not measured (no dense attention call reached the probe)"
+          for l in rep_lines), n)
+check("under its chunk", [rep_lines[j - 1][:10] for j, l in enumerate(rep_lines) if "attention" in l][:2],
+      ["  chunk 0:", "  chunk 1:"])
+(out, n, rep), _ = run()
+check("no probe, no line", "attention" in rep, False)
 
 # --- indices with no images attached are inert ----------------------------
 # A ladder reuses one graph across passes and usually only the first anchors, so a

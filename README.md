@@ -51,10 +51,15 @@ sequence. These nodes bias how much of it the model reads.
   (`carry_bias`) and its reference images more (`reference_bias`). It is aimed at the
   over-bake that builds up across chunks. A 173 s static talking head, 27 chunks, held
   with no visible bake or drift at `carry_bias` -1 and `reference_bias` 2 (one run,
-  judged by eye). A carry bias of -3 breaks the joins.
+  judged by eye). A carry bias of -3 breaks the joins. Shots with movement get pulled
+  toward the reference at those settings; `start_percent` limits the bias to later
+  steps, which is untested.
 - **MiniMax H3 Phrase Attention** makes the model listen harder to one phrase of the
   prompt, or mute it, with a per-chunk schedule. `value_scale` removes or subtracts
   what the phrase contributes.
+- **MiniMax H3 Attention Share Probe** measures what the other two act on: the share
+  of attention each chunk's new frames give the carry, the references, the text and
+  the audio, written into the Looping Sampler's report. Not run on real weights.
 
 Details and limits: [`docs/phrase-attention.md`](docs/phrase-attention.md). Each has
 an example workflow.
@@ -190,6 +195,7 @@ in [`docs/nodes.md`](docs/nodes.md).
 |---|---|
 | MiniMax H3 Carry Attention | Bias attention on carried frames, references and the clip's audio. Experimental. |
 | MiniMax H3 Phrase Attention | Bias attention on one phrase of the prompt. Experimental. |
+| MiniMax H3 Attention Share Probe | Report how much each chunk reads its carry, references, text and audio. Experimental. |
 | MMH3 AdaLN Reference Patch | Takes AdaLN modulation from another H3 checkpoint, per block. |
 
 **Prompt**
@@ -259,8 +265,9 @@ chunk puts them out of step.
   measurement in the docs was made on it.
 - **`carry="keyframe"` has never generated a clip.** Its plumbing is unit-tested only.
 - **Carry Attention and Phrase Attention are experimental**, tested on a handful of
-  clips. `reference_audio_bias` and `value_scale` have not been run on real weights.
-- **`guide_video` is unit-tested**, not yet run end to end here.
+  clips. `reference_audio_bias`, `guide_bias`, `guide_audio_bias` and `value_scale`
+  have not been run on real weights.
+- **`guide_video` and `guide_audio` are unit-tested**, not yet run end to end here.
 - Carried references are not seen by the text encoder, so don't use `<Video k>` tags
   for a carried chunk.
 - Join audio in the waveform after decoding, never in latent space.

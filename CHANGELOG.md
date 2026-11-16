@@ -13,6 +13,36 @@ the entry, and migrate any local workflow in the same commit.
 
 ### Added
 
+- **Looping Sampler: `guide_audio` and `audio_vae`.** An AUDIO input pinned as a guide
+  under every chunk: encoded once with the H3 audio vae, then each chunk takes its own
+  span, anchored at its frame 0. It is read, not generated, so the clip's audio is
+  unchanged; with the pinned track wired here too, the model sees it as the target and
+  as a guide. Refuses `carry="keyframe"`. **Both are inserted directly below
+  `guide_video`, not appended.** They are sockets with no widget, so saved widget
+  values do not move; a link into an input listed after them should be checked on old
+  graphs. Tests in
+  `tests/test_guide_video.py`; not run on real weights.
+
+- **Carry Attention: `guide_bias` and `guide_audio_bias`.** The reference biases, for
+  the guide rows: `guide_bias` on guide picture rows (`guide_video`, `keyframes`, a
+  `carry="keyframe"` tail), `guide_audio_bias` on guide audio rows (`guide_audio`, a
+  keyframe tail's sound). Appended last; 0 is off. Not run on real weights.
+  [`docs/phrase-attention.md`](docs/phrase-attention.md).
+
+- **MiniMax H3 Attention Share Probe** (`MMH3AttentionShareProbe`, MMH3Tools/model,
+  experimental). Measures the share of attention a Looping Sampler chunk's new frames
+  give the carried frames, the references, the text and the audio, and the sampler
+  writes it under each chunk of its report. It is what Carry Attention acts on and
+  had not been measured. Exact softmax over a sample of rows, with the other attention
+  nodes' biases included. Tests in `tests/test_attention_share.py`; not run on real
+  weights. [`docs/phrase-attention.md`](docs/phrase-attention.md).
+
+- **Carry Attention: `start_percent` and `end_percent`.** Limit the biases to part of
+  sampling, as ConditioningSetTimestepRange does for a prompt. For shots with movement:
+  the settings that hold a static shot pull a moving one back to the reference image,
+  and biasing only the later steps leaves motion and composition alone. Appended
+  last; the defaults 0 and 1 are every step, as before. Not run on real weights.
+
 - **`mmh3tools.live`: attention biases.** `LiveConfig` gains `carry_bias`
   and `reference_bias`, both off by default; a session with either set runs
   its model through Carry Attention. Each window now publishes its index and its

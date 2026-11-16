@@ -74,7 +74,7 @@ from .common import (AUDIO_LATENT_FPS, AUDIO_T_DIM, FPS, LATENTS_PER_GROUP,
                      frame_at_latent, frames_to_audio_t, latents_to_frames,
                      pack_av, unpack_av)
 from .nodes_loop import per_row_mask_is_continuous
-from .nodes_multiprompt import MMH3CondSet
+from .nodes_multiprompt import MMH3CondSet, _encode_ref_audio, _to_stereo, _trim_audio
 from .nodes_preview import begin_preview
 from .nodes_loop import masked_velocity_is_scaled
 from .nodes_windows import _audio_index_at, _plan, _window_frame_spans
@@ -508,7 +508,8 @@ class MMH3LoopingSampler(io.ComfyNode):
                 io.Vae.Input(
                     "vae", optional=True,
                     tooltip="The H3 VIDEO vae, needed only to encode `keyframes` and "
-                            "`guide_video`."),
+                            "`guide_video`. The audio vae for `guide_audio` is "
+                            "`audio_vae`, below it."),
                 io.Mask.Input(
                     "denoise_mask", optional=True,
                     tooltip="Denoise mask for the VIDEO half over the WHOLE clip: WHITE "
@@ -585,6 +586,26 @@ class MMH3LoopingSampler(io.ComfyNode):
                             "source's sound, use use_input_audio upstream.\n\n"
                             "Not with carry='keyframe' or `keyframes`: both would put a "
                             "second guide on the same frames."),
+                io.Audio.Input(
+                    "guide_audio", optional=True,
+                    tooltip="Sound pinned as a GUIDE under every chunk, on the output's "
+                            "own clock: its start is the clip's start. Encoded once with "
+                            "`audio_vae`; each chunk takes its own span, anchored at the "
+                            "chunk's frame 0, where the `guide_video` clip is anchored "
+                            "when both are wired.\n\n"
+                            "A guide is read, never generated: it does not replace the "
+                            "clip's own audio. Wiring the track that use_input_audio "
+                            "pinned gives the model it twice, once as the target and once "
+                            "as a guide, which is what Carry Attention's guide_audio_bias "
+                            "acts on. Experimental: the base model is not trained on "
+                            "audio guides. Needs #15439 and `audio_vae`.\n\n"
+                            "Shorter than the clip: later chunks get what is left, or "
+                            "nothing; longer: the excess is unused. Not with "
+                            "carry='keyframe', which already guides each chunk with the "
+                            "carried sound."),
+                io.Vae.Input(
+                    "audio_vae", optional=True,
+                    tooltip="The H3 AUDIO vae, needed only to encode `guide_audio`."),
                 io.Combo.Input(
                     "carry_color_match", options=["off", "first_chunk", "first_chunk_latent"],
                     default="off", optional=True,
@@ -624,7 +645,7 @@ class MMH3LoopingSampler(io.ComfyNode):
                 keyframes=None, keyframe_indices="", vae=None,
                 prior_av_latent=None, denoise_mask=None, denoise_mask_mode="max",
                 audio_denoise_mask=None, guide_video=None, carry_color_match="off",
-                carry_color_strength=1.0) -> io.NodeOutput:
+                carry_color_strength=1.0, guide_audio=None, audio_vae=None) -> io.NodeOutput:
         conds = (cond_set or {}).get("conds") or []
         if not conds:
             raise ValueError("MMH3LoopingSampler: cond_set holds no conditioning.")
@@ -890,6 +911,30 @@ class MMH3LoopingSampler(io.ComfyNode):
         gv_h = int(master_v.shape[3]) * VAE_SPATIAL
         gv_w = int(master_v.shape[4]) * VAE_SPATIAL
 
+        # ---- guide audio: sliced per chunk below, on the clip's audio clock ---
+        ga = None
+        if guide_audio is not None:
+            if not _guides_available():
+                raise RuntimeError(
+                    "MMH3LoopingSampler: guide_audio needs any-index guides (PR #15439).")
+            if carry == "keyframe":
+                raise ValueError(
+                    "MMH3LoopingSampler: guide_audio and carry='keyframe' both anchor an "
+                    "audio guide at every chunk's frame 0. Use carry='mask' with guide_audio.")
+            if audio_vae is None:
+                raise ValueError("MMH3LoopingSampler: guide_audio needs the H3 audio vae.")
+            # Encoded ONCE, as use_input_audio encodes a pinned track, so a guide made
+            # from the same audio is the same latents the target holds.
+            ga, ga_n = _encode_ref_audio(audio_vae, _trim_audio(
+                _to_stereo(guide_audio, "guide_audio"), total_a, "guide_audio"))
+            ga = ga[..., :total_a].to(dtype=master_a.dtype, device=master_a.device)
+            lines.append("  guide_audio: %.2fs for a %.2fs clip%s"
+                         % (ga_n / AUDIO_LATENT_FPS, total_a / AUDIO_LATENT_FPS,
+                            "" if ga_n >= total_a else
+                            " -- it runs out; later chunks get less or nothing"))
+            if ga_n < total_a:
+                logging.warning("[MMH3LoopingSampler] %s", lines[-1].strip())
+
         # ---- fill the master, chunk by chunk --------------------------------
         out_v = master_v.clone()
         out_a = None if master_a is None else master_a.clone()
@@ -1027,6 +1072,20 @@ class MMH3LoopingSampler(io.ComfyNode):
                 else:
                     gv_note = ", no guide (the guide video ended)"
 
+            # This chunk's span of the guide audio, at the same anchor. An entry of its
+            # own, with no picture: core reads a guide's sound and picture separately.
+            if ga is not None:
+                span = ga[:, :, :, a0:a1]
+                if span.shape[-1]:
+                    chunk_guides.append({"resolved_frame_index": 0,
+                                         "audio_latent": span.contiguous()})
+                    gv_note += ", guide audio %d-%d%s" % (
+                        a0, a0 + span.shape[-1] - 1,
+                        "" if span.shape[-1] == a1 - a0 else " (short: %d of %d)"
+                        % (span.shape[-1], a1 - a0))
+                else:
+                    gv_note += ", no guide audio (it ended)"
+
             if chunk_guides:
                 if _has_refs(chunk_cond) and not _guide_origin_correct():
                     raise RuntimeError(
@@ -1052,6 +1111,9 @@ class MMH3LoopingSampler(io.ComfyNode):
                 # Before, not after: the per-step callback fires during the sample
                 # and needs to know which chunk it is watching.
                 preview.set_chunk(i, v0, v1)
+            share = g.model_options["transformer_options"].get("mmh3_attention_share")
+            if share is not None:
+                share.reset()
             done = _run_sampling(
                 _chunk_noise(noise, i), g, sampler, sigmas, chunk,
                 sampling_start_step, sampling_end_step,
@@ -1097,6 +1159,9 @@ class MMH3LoopingSampler(io.ComfyNode):
                             frame_at_latent(carried) if carried else 0,
                             ", %d keyframe(s)" % len(guides_by_chunk[i])
                             if guides_by_chunk.get(i) else "", gv_note, cc_note))
+            if share is not None:
+                lines.append("    " + share.line())
+                logging.info("[MMH3LoopingSampler] chunk %d %s", i, lines[-1].strip())
             if preview is not None:
                 preview.chunk(i, dv, v0, v1, da)
             logging.info("[MMH3LoopingSampler] chunk %d/%d done", i + 1, n)

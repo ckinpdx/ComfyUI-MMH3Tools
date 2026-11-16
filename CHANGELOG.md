@@ -70,6 +70,10 @@ the entry, and migrate any local workflow in the same commit.
 
 ### Changed
 
+- **`MMH3_LoopingSampler_MusicVideo.json`: the three plan nodes are titled** by stage
+  (Definitions, Beats, Shots). `treatments` is read only by the shots stage, and the
+  three untitled copies of the node made it hard to find. Not loaded in ComfyUI.
+
 - **Carry Attention held 173.75 s.** A static talking head over supplied audio, 27
   chunks of 192 frames with a 39-frame overlap, at `carry_bias` -1 and `reference_bias`
   2, with no visible bake, drift or broken join (one run, judged by eye, no control at

@@ -1124,6 +1124,9 @@ the result is usable.
 - **MiniMax H3 Carry Attention** — experimental. The same bias on the frames a Looping
   Sampler chunk carries from the previous one (`carry="mask"`): negative makes the chunk
   read its carry less. `reference_bias` and `reference_audio_bias` do the same for the references, `guide_bias` and `guide_audio_bias` for the guides. See [`phrase-attention.md`](phrase-attention.md#carry-attention).
+- **MiniMax H3 Guide Mask** — experimental. Hides a keyframe from the frames around it,
+  so one still repeated mid-chunk holds a static scene without the picture snapping to
+  it. See [`phrase-attention.md`](phrase-attention.md#guide-mask).
 - **MMH3 AdaLN Reference Patch** — take AdaLN modulation from another H3 checkpoint,
   per block. `fl2va` and `ref2va` are the same model *except* for AdaLN: attention,
   MLP, `condition_proj`, the patch projections and the output heads all measure at

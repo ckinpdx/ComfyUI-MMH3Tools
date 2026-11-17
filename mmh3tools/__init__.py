@@ -28,6 +28,7 @@ from .nodes_trim import (
 )
 from .nodes_phrase_attention import MMH3PhraseAttention
 from .nodes_carry_attention import MMH3CarryAttention
+from .nodes_guide_mask import MMH3GuideMask
 from .nodes_attention_share import MMH3AttentionShareProbe
 from .nodes_multiprompt import (
     MMH3CondSelect,
@@ -102,6 +103,7 @@ NODES = [
     MMH3AdaLNRefPatch,
     MMH3PhraseAttention,
     MMH3CarryAttention,
+    MMH3GuideMask,
     MMH3AttentionShareProbe,
     # MMH3Tools/prompt
     MMH3AssetPlan,

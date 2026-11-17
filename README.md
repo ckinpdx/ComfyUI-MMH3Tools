@@ -195,6 +195,7 @@ in [`docs/nodes.md`](docs/nodes.md).
 |---|---|
 | MiniMax H3 Carry Attention | Bias attention on carried frames, references and the clip's audio. Experimental. |
 | MiniMax H3 Phrase Attention | Bias attention on one phrase of the prompt. Experimental. |
+| MiniMax H3 Guide Mask | Hide a keyframe from the frames around it, to hold a static scene on one still. Experimental. |
 | MiniMax H3 Attention Share Probe | Report how much each chunk reads its carry, references, text and audio. Experimental. |
 | MMH3 AdaLN Reference Patch | Takes AdaLN modulation from another H3 checkpoint, per block. |
 

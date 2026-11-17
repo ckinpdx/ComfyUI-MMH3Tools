@@ -271,6 +271,14 @@ check("no start drops one", LS.MMH3KeyframePlanner.execute(
 check("no end drops one", LS.MMH3KeyframePlanner.execute(
     TOTAL, CHUNK, OV, True, False).result[1], 7)
 
+idx, cnt, _nch, _rep = LS.MMH3KeyframePlanner.execute(TOTAL, CHUNK, OV, True, False, "chunk middle").result
+check("chunk middle: the opening and one per later chunk", cnt, 7)
+(_o, _n, _r), _g = run(kf=torch.zeros([cnt, 64, 64, 3]), kf_idx=idx, vae=FakeVae())
+kfs = [gg.raw_conds[0][0][1].get("minimax_keyframes") or [] for gg in SEEN["guiders"]]
+check("each lands in its own chunk", [len(k) for k in kfs], [1] * 7)
+check("past the carry and short of the chunk's end",
+      all(OV < k[0]["resolved_frame_index"] < CHUNK - OV for k in kfs[1:]), True)
+
 print("\n14. the schedule window, per chunk (LTXAVTools' semantics)")
 (_o, _n, rep5), _g = run()
 check("unwindowed: one sampler call per chunk", len(SEEN["calls"]), 7)

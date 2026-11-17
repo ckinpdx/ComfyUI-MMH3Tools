@@ -23,6 +23,18 @@ the entry, and migrate any local workflow in the same commit.
   graphs. Tests in
   `tests/test_guide_video.py`; not run on real weights.
 
+- **MiniMax H3 Guide Mask.** LongCat-Video-Avatar's `mask_frame_range` as a node: the
+  video latents within `mask_range` of a guide picture cannot see it, so the frames
+  around a mid-chunk keyframe do not copy it. A hard mask run as one plain attention
+  call per run of query rows, with no mask passed to the backend. Tests in
+  `tests/test_guide_mask.py`; one run on real weights.
+  [`docs/phrase-attention.md`](docs/phrase-attention.md#guide-mask).
+
+- **Keyframe Planner: `placement`.** `chunk middle` puts a keyframe at frame 0 and in
+  the middle of the frames every later chunk draws, for one still repeated through a
+  static scene with Guide Mask. Appended last; `chunk end` is the old
+  behaviour. Tests in `tests/test_looping_sampler.py` §13.
+
 - **Carry Attention: `guide_bias` and `guide_audio_bias`.** The reference biases, for
   the guide rows: `guide_bias` on guide picture rows (`guide_video`, `keyframes`, a
   `carry="keyframe"` tail), `guide_audio_bias` on guide audio rows (`guide_audio`, a

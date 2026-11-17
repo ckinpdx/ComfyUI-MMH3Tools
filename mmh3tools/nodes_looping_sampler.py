@@ -1364,6 +1364,11 @@ class MMH3KeyframePlanner(io.ComfyNode):
 
     Takes the same three numbers the sampler does and derives the same schedule
     from `_plan`, so the two cannot disagree about where a chunk ends.
+
+    placement="chunk middle" is LongCat-Video-Avatar's layout for a static scene:
+    frame 0 opens, and every later chunk gets a keyframe in the middle of the
+    frames it draws, to be read from a distance (MiniMax H3 Guide
+    Mask) rather than travelled to.
     """
 
     @classmethod
@@ -1390,6 +1395,15 @@ class MMH3KeyframePlanner(io.ComfyNode):
                                  tooltip="A keyframe at frame 0 -- the opening image."),
                 io.Boolean.Input("include_end", default=True,
                                  tooltip="A keyframe at -1 -- the closing image."),
+                io.Combo.Input(
+                    "placement", options=["chunk end", "chunk middle"], default="chunk end",
+                    optional=True,
+                    tooltip="'chunk end' travels: each chunk generates toward the image at "
+                            "its end. 'chunk middle' holds a static scene: frame 0 opens "
+                            "and every later chunk gets a keyframe in the middle of the "
+                            "frames it draws. Feed one image through core's Repeat Image "
+                            "Batch with `count` as its amount, and wire the model through "
+                            "Guide Mask so the frames around each one do not copy it."),
             ],
             outputs=[
                 io.String.Output(display_name="indices"),
@@ -1401,7 +1415,7 @@ class MMH3KeyframePlanner(io.ComfyNode):
 
     @classmethod
     def execute(cls, total_frames, chunk_frames, overlap_frames,
-                include_start, include_end) -> io.NodeOutput:
+                include_start, include_end, placement="chunk end") -> io.NodeOutput:
         _length, _ov, total_f, _t, windows = _plan(
             int(total_frames), int(chunk_frames), int(overlap_frames),
             "standard_static")
@@ -1418,6 +1432,10 @@ class MMH3KeyframePlanner(io.ComfyNode):
         for i in range(len(spans) - 1):
             d = min(spans[i + 1][0] + ov_f - 1, spans[i][1])
             dests.append(max(d, spans[i][0]))
+
+        if placement == "chunk middle":
+            ends = dests + [spans[-1][1]]
+            dests = [(spans[i][0] + ov_f + ends[i]) // 2 for i in range(1, len(spans))]
 
         entries = ([0] if include_start else []) + dests
         if include_end:

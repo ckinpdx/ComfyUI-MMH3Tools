@@ -118,6 +118,30 @@ biases add. Not run on real weights.
 - All references of a kind get the same bias. A larger reference has more rows and
   so already takes more attention at the same value.
 
+## Guide Mask
+
+**MiniMax H3 Guide Mask** is LongCat-Video-Avatar's `mask_frame_range`, which stops a
+still placed mid-chunk from pulling the frames around it back to its pose. It is for a
+static scene held by one image: the Keyframe Planner's `chunk middle` puts the image at
+frame 0 and in the middle of every later chunk, core's Repeat Image Batch repeats it by
+the planner's `count`, and this node goes on the model.
+
+**mask_range** is how many video latents either side of a guide picture cannot see it
+at all; the rest of the chunk reads it as before. 2 hides a still from 5 latents, about
+20 frames. **blocks** is as above.
+
+- It is a hard mask, where Carry Attention's `guide_bias` is a soft one, and it passes
+  no mask: the query rows are split into runs and each run is a plain attention call
+  over the keys it may see, so the backend never takes its masked path.
+- **One run on real weights** (2026-11-16): a static talking head over supplied audio
+  with `mask_range` 2 and every Carry Attention bias at 0 held well, judged by eye. No
+  control without the mask was rendered.
+- A `guide_video` spanning the chunk is hidden from all of it, so it is for stills.
+- It chains with Carry Attention and Phrase Attention in either order. Use one Guide
+  Mask per chain.
+- The Attention Share Probe does not see it.
+- Covered by `tests/test_guide_mask.py` against a single masked attention call.
+
 ## Attention Share Probe
 
 **MiniMax H3 Attention Share Probe** measures what Carry Attention acts on. Wire the
